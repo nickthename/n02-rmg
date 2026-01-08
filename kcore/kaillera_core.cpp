@@ -507,6 +507,12 @@ void kaillera_leave_game (){
 	lg.type = INSTRUCTION_GAMRLEAV;
 	lg.store_short(-1);
 	KAILLERAC.connection->send_instruction(&lg);
+
+	// Notify RMG to stop emulation (same as dropping)
+	kaillera_player_dropped_callback(KAILLERAC.USERNAME, KAILLERAC.playerno);
+	KAILLERAC.PLAYERSTAT = 0;
+	kaillera_end_game_callback();
+
 	kaillera_user_game_closed_callback();
 }
 
