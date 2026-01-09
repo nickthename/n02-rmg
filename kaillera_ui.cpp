@@ -83,6 +83,7 @@ UINT_PTR kaillera_sdlg_sipd_timer;
 int kaillera_sdlg_frameno = 0;
 int kaillera_sdlg_pps = 0;
 int kaillera_sdlg_delay = -1;
+int kaillera_frame_delay_override = 0;
 bool MINGUIUPDATE;
 //=======================================================================
 bool kaillera_RecordingEnabled(){
@@ -849,8 +850,8 @@ void ConnectToServer(char * ip, int port, HWND pDlg,char * name) {
 		strcpy(kaillera_sdlg_ip, ip);
 		DialogBox(hx, (LPCTSTR)KAILLERA_SDLG, pDlg, (DLGPROC)KailleraServerDialogProc);
 		//disconnect
-		char quitmsg[128];
-		GetWindowText(GetDlgItem(kaillera_ssdlg, IDC_QUITMSG), quitmsg, 128);
+		char quitmsg[128] = "Open Kaillera - n02 " KAILLERA_VERSION;
+		// Frame delay field repurposed - use default quit message
 		kaillera_disconnect(quitmsg);
 		kaillera_core_cleanup();
 
@@ -1107,6 +1108,11 @@ LRESULT CALLBACK CustomIPDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM 
 			break;
 		case WM_COMMAND:
 			if (LOWORD(wParam)==BTN_CONNECT){
+				// Read frame delay override from main dialog before connecting
+				char fdly_buf[16];
+				GetWindowText(GetDlgItem(kaillera_ssdlg, IDC_QUITMSG), fdly_buf, 16);
+				kaillera_frame_delay_override = atoi(fdly_buf);
+
 				char * host = KLSNST_temp.hostname;
 				GetWindowText(GetDlgItem(hDlg, IDC_IP), host, 128);
 				int port = 27888;
@@ -1181,12 +1187,11 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 			}
 			
 			{
-				DWORD xxx = 32;
-				char QUITMSG[128] = "Open Kaillera - n02 " KAILLERA_VERSION;
-				char un[128];
-				nSettings::get_str("QMSG", un, QUITMSG);
-				strncpy(QUITMSG, un, 128);
-				SetWindowText(GetDlgItem(hDlg, IDC_QUITMSG), QUITMSG);
+				// Frame delay override (0 = use server value)
+				kaillera_frame_delay_override = nSettings::get_int("FDLY", 0);
+				char fdly_str[16];
+				sprintf(fdly_str, "%d", kaillera_frame_delay_override);
+				SetWindowText(GetDlgItem(hDlg, IDC_QUITMSG), fdly_str);
 			}
 
 			
@@ -1218,8 +1223,10 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 	case WM_CLOSE:
 		{
 			char tbuf[128];
+			// Save frame delay override
 			GetWindowText(GetDlgItem(hDlg, IDC_QUITMSG), tbuf, 128);
-			nSettings::set_str("QMSG", tbuf);
+			kaillera_frame_delay_override = atoi(tbuf);
+			nSettings::set_int("FDLY", kaillera_frame_delay_override);
 			
 			GetWindowText(GetDlgItem(hDlg, IDC_USRNAME), tbuf, 128);
 			nSettings::set_str("USRN", tbuf);
@@ -1253,6 +1260,12 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 				KLSListTRACE();
 				break;
 			case BTN_CONNECT:
+				{
+					// Read frame delay override before connecting
+					char fdly_buf[16];
+					GetWindowText(GetDlgItem(hDlg, IDC_QUITMSG), fdly_buf, 16);
+					kaillera_frame_delay_override = atoi(fdly_buf);
+				}
 				KLSListConnect();
 				break;
 			case BTN_ABOUT:
@@ -1276,6 +1289,10 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 		case WM_NOTIFY:
 
 			if(((LPNMHDR)lParam)->code==NM_DBLCLK && ((LPNMHDR)lParam)->hwndFrom==KLSListLv.handle){
+				// Read frame delay override before connecting
+				char fdly_buf[16];
+				GetWindowText(GetDlgItem(hDlg, IDC_QUITMSG), fdly_buf, 16);
+				kaillera_frame_delay_override = atoi(fdly_buf);
 				KLSListConnect();
 			}
 			if(((LPNMHDR)lParam)->code==NM_RCLICK && ((LPNMHDR)lParam)->hwndFrom==KLSListLv.handle){

@@ -13,6 +13,7 @@
 #define KAILLERA_TIMEOUT_NETSYNC_RETR_INTERVAL 5000
 
 extern int PACKETLOSSCOUNT;
+extern int kaillera_frame_delay_override;
 
 typedef struct {
 	k_message * connection;
@@ -277,11 +278,20 @@ void kaillera_ProcessGeneralInstruction(k_instruction * ki) {
 			//KAILLERAC.USERSTAT = 3;
 			KAILLERAC.PLAYERSTAT = 1;
 			KAILLERAC.throughput = ki->load_short();
-			KAILLERAC.dframeno = (KAILLERAC.throughput + 1) * KAILLERAC.conset - 1;
+			int server_delay = (KAILLERAC.throughput + 1) * KAILLERAC.conset - 1;
+
+			// Apply delay override if set, otherwise use server delay
+			if (kaillera_frame_delay_override > 0) {
+				KAILLERAC.dframeno = kaillera_frame_delay_override;
+				kaillera_core_debug("Server delay: %i frames, using override: %i frames", server_delay, KAILLERAC.dframeno);
+			} else {
+				KAILLERAC.dframeno = server_delay;
+				kaillera_core_debug("Server says: delay is %i frames", KAILLERAC.dframeno);
+			}
+
 			KAILLERAC.playerno = ki->load_char();
 			int players = ki->load_char();
 			kaillera_game_callback(0, KAILLERAC.playerno, players);
-			kaillera_core_debug("Server says: delay is %i frames", KAILLERAC.dframeno);
 			break;
 		}
 	case GAMRSLST:
