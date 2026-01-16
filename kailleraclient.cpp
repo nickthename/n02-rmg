@@ -205,7 +205,9 @@ int WINAPI _gameCallback(char *game, int player, int numplayers){
 		n02_TRACE();
 	}
 
-	return infos_copy.gameCallback(game, player, numplayers);
+	if (infos_copy.gameCallback)
+		return infos_copy.gameCallback(game, player, numplayers);
+	return 0;
 	
 }
 
@@ -488,7 +490,8 @@ extern "C" {
 						else if (KSSDFA.state == 1) {
 							//kprintf("call gamecallback");
 							KSSDFA.state = 2;
-							infos.gameCallback(GAME, playerno, numplayers);
+							if (infos.gameCallback)
+								infos.gameCallback(GAME, playerno, numplayers);
 						}
 						else if (KSSDFA.state == 0) {
 							MSG message;
