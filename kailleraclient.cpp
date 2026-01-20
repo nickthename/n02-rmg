@@ -467,7 +467,7 @@ extern "C" {
 	void KAILLERA_DLLEXP kailleraSelectServerDialog(void* parent){
 		KSSDFA.state = 0;
 		KSSDFA.input = 0;
-		
+
 		gui_thread.st(parent);
 		
 		nThread game_thread;
