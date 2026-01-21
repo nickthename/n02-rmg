@@ -974,7 +974,35 @@ void KLSListDisplay(){
 	KLSListLv.DeleteAllRows();
 	for (int x = 0; x< KLSList.length; x++){
 		KLSListLv.AddRow(KLSList[x].servname, x);
-		KLSListLv.FillRow(KLSList[x].hostname,1, x);
+		KLSListLv.FillRow(KLSList[x].hostname, 1, x);
+		KLSListLv.FillRow("-", 2, x);  // Ping
+	}
+}
+
+void KLSListRefreshStatus(){
+	for (int x = 0; x < KLSList.length; x++){
+		char host_copy[128];
+		strncpy(host_copy, KLSList[x].hostname, 127);
+		host_copy[127] = 0;
+
+		char* host = host_copy;
+		int port = 27888;
+
+		// Parse host:port
+		char* colon = strchr(host_copy, ':');
+		if (colon) {
+			*colon = 0;
+			port = atoi(colon + 1);
+			if (port == 0) port = 27888;
+		}
+
+		int ping = kaillera_ping_server(host, port, 500);
+		char pingstr[32];
+		if (ping < 500)
+			wsprintf(pingstr, "%ims", ping);
+		else
+			strcpy(pingstr, "N/A");
+		KLSListLv.FillRow(pingstr, 2, x);
 	}
 }
 
@@ -1053,7 +1081,7 @@ void KLSListPING(){
 		int ping = kaillera_ping_server(host, port);
 		char pingstr[128];
 		wsprintf(pingstr, "%ims", ping);
-		KLSListLv.FillRow(pingstr, 1, i);
+		KLSListLv.FillRow(pingstr, 2, i);  // Ping column
 
 		//CreateProcess(0, "cmd /k tracert", 0, 0, 0, 0, 0, 0, 0, 0);
 	}
@@ -1133,17 +1161,38 @@ void KLSListDblClick(HWND hDlg){
 
 void KLSListLoad(){
 	KLSList.clear();
+
+	// Always add default servers first
+	KLSNST sx;
+	strcpy(sx.servname, "Chicago SSB"); strcpy(sx.hostname, "92.38.176.115:27888"); KLSList.add(sx);
+	strcpy(sx.servname, "SSBL Georgia Netplay"); strcpy(sx.hostname, "45.61.60.96:27888"); KLSList.add(sx);
+	strcpy(sx.servname, "Miami Secret"); strcpy(sx.hostname, "185.144.159.190:27888"); KLSList.add(sx);
+	strcpy(sx.servname, "Seattle"); strcpy(sx.hostname, "23.227.163.253:27888"); KLSList.add(sx);
+	strcpy(sx.servname, "San Fran"); strcpy(sx.hostname, "165.227.60.3:27888"); KLSList.add(sx);
+
+	// Add any saved servers that aren't duplicates of defaults
 	int count = nSettings::get_int("SLC", 0);
 	for (int x=1;x<=count;x++){
 		char idt[32];
-		KLSNST sx;
+		KLSNST saved;
 		wsprintf(idt, "SLS%i", x);
-		nSettings::get_str(idt,sx.servname, "UserName");
+		nSettings::get_str(idt,saved.servname, "UserName");
 		wsprintf(idt, "SLH%i", x);
-		nSettings::get_str(idt,sx.hostname, "127.0.0.1");
-		KLSList.add(sx);
+		nSettings::get_str(idt,saved.hostname, "127.0.0.1");
+
+		// Check if this hostname already exists in the list
+		bool duplicate = false;
+		for (int i=0; i<KLSList.length; i++){
+			if (strcmp(KLSList[i].hostname, saved.hostname) == 0){
+				duplicate = true;
+				break;
+			}
+		}
+		if (!duplicate)
+			KLSList.add(saved);
 	}
 	KLSListDisplay();
+	KLSListRefreshStatus();
 }
 
 void KLSListSave(){
@@ -1304,8 +1353,9 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 			
 			
 			KLSListLv.handle = GetDlgItem(hDlg, LV_ULIST);
-			KLSListLv.AddColumn("Name", 200);
-			KLSListLv.AddColumn("IP", 180);
+			KLSListLv.AddColumn("Name", 160);
+			KLSListLv.AddColumn("IP", 150);
+			KLSListLv.AddColumn("Ping", 60);
 			KLSListLv.FullRowSelect();
 			
 			
