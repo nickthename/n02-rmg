@@ -11,7 +11,6 @@
 #include "common/nThread.h"
 #include "common/nSettings.h"
 
-
 bool KAILLERA_CORE_INITIALIZED = false;
 bool inGame = false;
 
@@ -255,7 +254,7 @@ void __cdecl kaillera_ui_gdebug(char* arg_0, ...) {
 	vsprintf(V88, V8, args);
 	va_end(args);
 
-	re_append(kaillera_sdlg_RE_GCHAT, V88, 0x00999999);
+	re_append(kaillera_sdlg_RE_GCHAT, V88, 0x00000000);
 }
 
 void __cdecl kaillera_core_debug(char * arg_0, ...) {
@@ -307,7 +306,7 @@ void __cdecl kaillera_ui_debug(char * arg_0, ...) {
 	vsprintf (V88, V8, args);
 	va_end (args);
 
-	re_append(kaillera_sdlg_partchat, V88, 0x00999999);
+	re_append(kaillera_sdlg_partchat, V88, 0x00000000);
 }
 
 void __cdecl kaillera_outpf(char * arg_0, ...) {
@@ -700,6 +699,12 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 	switch (uMsg) {
 	case WM_INITDIALOG:
 		{
+			// Add WS_EX_APPWINDOW and remove WS_EX_TOOLWINDOW to show in Windows taskbar
+			LONG_PTR exStyle = GetWindowLongPtr(hDlg, GWL_EXSTYLE);
+			exStyle |= WS_EX_APPWINDOW;
+			exStyle &= ~WS_EX_TOOLWINDOW;
+			SetWindowLongPtr(hDlg, GWL_EXSTYLE, exStyle);
+
 			kaillera_sdlg = hDlg;
 			{
 				char xx[256];
@@ -1233,9 +1238,14 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 	switch (uMsg) {
 	case WM_INITDIALOG:
 		{
-			
+			// Add WS_EX_APPWINDOW and remove WS_EX_TOOLWINDOW to show in Windows taskbar
+			LONG_PTR exStyle = GetWindowLongPtr(hDlg, GWL_EXSTYLE);
+			exStyle |= WS_EX_APPWINDOW;
+			exStyle &= ~WS_EX_TOOLWINDOW;
+			SetWindowLongPtr(hDlg, GWL_EXSTYLE, exStyle);
+
 			kaillera_ssdlg = hDlg;
-			
+
 			SetWindowText(hDlg, "n02 " KAILLERA_VERSION);
 			
 			nSettings::Initialize("SC");
@@ -1419,10 +1429,10 @@ void kaillera_GUI(){
 	icx.dwSize = sizeof(icx);
 	icx.dwICC = ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES;
 	InitCommonControlsEx(&icx);
-	
+
 	HMODULE p2p_riched_hm = LoadLibrary("riched32.dll");
-	
+
 	DialogBox(hx, (LPCTSTR)KAILLERA_SSDLG, 0, (DLGPROC)KailleraServerSelectDialogProc);
-	
+
 	FreeLibrary(p2p_riched_hm);
 }

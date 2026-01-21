@@ -693,7 +693,7 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 	switch (uMsg) {
 		case WM_INITDIALOG:
 		{
-			
+
 			p2p_ui_ss_dlg = hDlg;
 
 			SetWindowText(hDlg, "n02.p2p " P2P_VERSION);
@@ -837,11 +837,9 @@ void p2p_GUI(){
 	InitCommonControlsEx(&icx);
 
 	HMODULE p2p_riched_hm = LoadLibrary("riched32.dll");
-	
 
 	DialogBox(hx, (LPCTSTR)MAIN_DIALOG, 0, (DLGPROC)P2PSelectionDialogProc);
 
 	FreeLibrary(p2p_riched_hm);
-
 }
 
