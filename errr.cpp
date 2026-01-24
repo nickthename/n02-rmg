@@ -17,36 +17,35 @@
 
 
 #include <cstdio>
+#include <limits.h>
 
 //#include "common/nprintf.h"
 // our most sexing debug/logging function
 void __cdecl kprintf(char * arg_0, ...) {
 	//print on console
 #if 1
-	char V8[1024];
 	char V88[2048];
-
-	//nsprintf(V8, "%s\r\n",arg_0);
-	//nvsprintf(V88, V8, &arg_0);
-	//nprintf(V88);
-	sprintf(V8, "%s",arg_0);
 	va_list args;
 	va_start(args, arg_0);
-	vsprintf (V88, V8, args);
+	V88[0] = 0;
+	if (arg_0 != NULL)
+		vsnprintf_s(V88, sizeof(V88), _TRUNCATE, arg_0, args);
 	va_end(args);
 
 	//log to file
 #if 1
 	static HFILE hx = HFILE_ERROR;
 
-	if (hx == HFILE_ERROR) {
-		OFSTRUCT of;
-		hx = OpenFile("keaa.txt", &of, OF_CREATE|OF_WRITE);
+		if (hx == HFILE_ERROR) {
+			OFSTRUCT of;
+			hx = OpenFile("keaa.txt", &of, OF_CREATE|OF_WRITE);
+		}
+		size_t len = strlen(V88);
+		UINT writeLen = (len > (size_t)UINT_MAX) ? UINT_MAX : (UINT)len;
+		_lwrite(hx, V88, writeLen);
+	#endif
+	#endif
 	}
-	_lwrite(hx, V88, strlen(V88));
-#endif
-#endif
-}
 
 typedef struct {
 	char * file;
@@ -163,4 +162,3 @@ int n02ExceptionFilterFunction(_EXCEPTION_POINTERS *ExceptionInfo) {
 	DialogBoxParam(hx, (LPCTSTR)N02_ERRORDLG, 0, (DLGPROC)ErrorReporterDialogProc, (LPARAM)ExceptionInfo);
 	return EXCEPTION_EXECUTE_HANDLER;
 }
-

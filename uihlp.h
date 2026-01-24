@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <stdio.h>
+#include <limits.h>
 
 class nTab{
 public:
@@ -160,29 +161,36 @@ public:
 
 
 
-inline void re_append(HWND hwnd, char * line, COLORREF color = 0){
-	//kprintf(line);
-	int i = strlen(line);
-	CHARRANGE cr;
-	GETTEXTLENGTHEX gtx;
-	gtx.codepage = CP_ACP;
-	gtx.flags = GTL_PRECISE;
-	cr.cpMin = GetWindowTextLength(hwnd);//SendMessage(p2p_ui_con_richedit, EM_GETTEXTLENGTHEX, (WPARAM)&gtx, 0);
-	cr.cpMax = cr.cpMin +i;
-	SendMessage(hwnd, EM_EXSETSEL, 0, (LPARAM)&cr);
-	CHARFORMATA crf;
-	memset(&crf, 0, sizeof(crf));
-	crf.cbSize = sizeof(crf);
-	crf.dwMask = CFM_COLOR | CFM_EFFECTS;
-	crf.dwEffects = 0;  // Clear CFE_AUTOCOLOR
-	crf.crTextColor = color;
-	SendMessage(hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&crf);
-	SendMessage(hwnd, EM_REPLACESEL, FALSE, (LPARAM)line);
-	//SendMessage(hwnd, EM_EXSETSEL, 0, (LPARAM)&cr);
-	//SendMessage(hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&crf);
+	inline void re_append(HWND hwnd, char * line, COLORREF color = 0){
+		size_t len = strlen(line);
+		LONG addLen = (len > (size_t)LONG_MAX) ? LONG_MAX : (LONG)len;
 
-	SendMessage(hwnd, WM_VSCROLL, SB_BOTTOM, 0);
-}
+		// Preserve the user's selection (p2pkaillera behavior). This prevents the output window
+		// from "stealing" selection when the user highlights/copies text.
+		CHARRANGE prev;
+		SendMessage(hwnd, EM_EXGETSEL, 0, (LPARAM)&prev);
+
+		CHARRANGE cr;
+		cr.cpMin = GetWindowTextLength(hwnd);
+		cr.cpMax = cr.cpMin + addLen;
+		SendMessage(hwnd, EM_EXSETSEL, 0, (LPARAM)&cr);
+
+		CHARFORMATA crf;
+		memset(&crf, 0, sizeof(crf));
+		crf.cbSize = sizeof(crf);
+		crf.dwMask = CFM_COLOR | CFM_EFFECTS;
+		crf.dwEffects = 0;  // Clear CFE_AUTOCOLOR
+		crf.crTextColor = color;
+
+		SendMessage(hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&crf);
+		SendMessage(hwnd, EM_REPLACESEL, FALSE, (LPARAM)line);
+		SendMessage(hwnd, EM_EXSETSEL, 0, (LPARAM)&cr);
+		SendMessage(hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&crf);
+
+		// Restore previous selection and scroll to bottom.
+		SendMessage(hwnd, EM_EXSETSEL, 0, (LPARAM)&prev);
+		SendMessage(hwnd, WM_VSCROLL, SB_BOTTOM, 0);
+	}
 
 inline void get_timestamp(char* buffer, size_t size) {
 	SYSTEMTIME st;
@@ -190,5 +198,7 @@ inline void get_timestamp(char* buffer, size_t size) {
 	int hour = st.wHour % 12;
 	if (hour == 0) hour = 12;
 	const char* ampm = (st.wHour >= 12) ? "PM" : "AM";
-	sprintf(buffer, "[%d:%02d %s] ", hour, st.wMinute, ampm);
+	if (size == 0)
+		return;
+	_snprintf_s(buffer, size, _TRUNCATE, "[%d:%02d %s] ", hour, st.wMinute, ampm);
 }

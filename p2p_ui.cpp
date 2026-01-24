@@ -3,6 +3,7 @@
 #include "common/nSettings.h"
 #include "p2p_ui.h"
 #include <windows.h>
+#include <limits.h>
 #include <stdarg.h>
 #include "string.h"
 #include "common/nSTL.h"
@@ -14,6 +15,13 @@
 
 extern HINSTANCE hx;
 
+static void UpdateModeRadioButtons(HWND hDlg){
+	int mode = get_active_mode_index();
+	if (mode < 0 || mode > 2)
+		mode = 1;
+	CheckRadioButton(hDlg, RB_MODE_P2P, RB_MODE_PLAYBACK, RB_MODE_P2P + mode);
+}
+
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -23,29 +31,29 @@ extern HINSTANCE hx;
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 void outp(char * line);
-void __cdecl outpf(char * arg_0, ...) {
-	char V8[1024];
-	char V88[2084];
+static void AppendP2PFormattedLine(char* fmt, va_list args) {
+	char msg[2048];
+	msg[0] = 0;
+	vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, args);
+
 	char ts[20];
 	get_timestamp(ts, sizeof(ts));
-	sprintf(V8, "%s%s\r\n", ts, arg_0);
+
+	char line[4096];
+	_snprintf_s(line, sizeof(line), _TRUNCATE, "%s%s\r\n", ts, msg);
+	outp(line);
+}
+void __cdecl outpf(char * arg_0, ...) {
 	va_list args;
 	va_start (args, arg_0);
-	vsprintf (V88, V8, args);
+	AppendP2PFormattedLine(arg_0, args);
 	va_end (args);
-	outp(V88);
 }
 void __cdecl p2p_core_debug(char * arg_0, ...) {
-	char V8[1024];
-	char V88[2084];
-	char ts[20];
-	get_timestamp(ts, sizeof(ts));
-	sprintf(V8, "%s%s\r\n", ts, arg_0);
 	va_list args;
 	va_start (args, arg_0);
-	vsprintf (V88, V8, args);
+	AppendP2PFormattedLine(arg_0, args);
 	va_end (args);
-	outp(V88);
 }
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -147,7 +155,8 @@ int p2p_getSelectedDelay() {
 	return p2p_option_smoothing;
 }
 void p2p_game_callback(char * game, int playernop, int maxplayersp){
-	strcpy(GAME, game);
+	strncpy(GAME, (game != NULL) ? game : "", sizeof(GAME) - 1);
+	GAME[sizeof(GAME) - 1] = 0;
 	playerno = playernop;
 	numplayers = maxplayersp;
 	KSSDFA.input = KSSDFA_START_GAME;
@@ -174,11 +183,15 @@ void p2p_ui_chat_send(char * xxx){
 		char* host = ptr;
 		while (*++ptr != ' '); *ptr++ = 0;
 		int port = atoi(ptr);
-		while (*++ptr != ' '); *ptr++ = 0;
-		char* cmd = ptr;
-		p2p_send_ssrv_packet(cmd, strlen(cmd)+1, host, port);
-		return;
-	} else if (strcmp(xxx, "/stats")==0) {
+			while (*++ptr != ' '); *ptr++ = 0;
+			char* cmd = ptr;
+			{
+				size_t cmdLen = strlen(cmd) + 1;
+				int sendLen = (cmdLen > (size_t)INT_MAX) ? INT_MAX : (int)cmdLen;
+				p2p_send_ssrv_packet(cmd, sendLen, host, port);
+			}
+			return;
+		} else if (strcmp(xxx, "/stats")==0) {
 		StatsDisplayThreadBegin();
 		return;
 	}
@@ -335,22 +348,16 @@ void IniaialzeConnectionDialog(HWND hDlg){
 char peername[32];
 char peerapp[128];
 void p2p_peer_info_callback(char* p33rname, char* app) {
-	strcpy(peername, p33rname);
-	strcpy(peerapp, app);
+	strncpy(peername, (p33rname != NULL) ? p33rname : "", sizeof(peername) - 1);
+	peername[sizeof(peername) - 1] = 0;
+	strncpy(peerapp, (app != NULL) ? app : "", sizeof(peerapp) - 1);
+	peerapp[sizeof(peerapp) - 1] = 0;
 }
 
 void outp(char * line){
-	//kprintf(line);
-	int i = strlen(line);
-	CHARRANGE cr;
-	GETTEXTLENGTHEX gtx;
-	gtx.codepage = CP_ACP;
-	gtx.flags = GTL_PRECISE;
-	cr.cpMin = GetWindowTextLength(p2p_ui_con_richedit);//SendMessage(p2p_ui_con_richedit, EM_GETTEXTLENGTHEX, (WPARAM)&gtx, 0);
-	cr.cpMax = cr.cpMin;//+i;
-	SendMessage(p2p_ui_con_richedit, EM_EXSETSEL, 0, (LPARAM)&cr);
-	SendMessage(p2p_ui_con_richedit, EM_REPLACESEL, FALSE, (LPARAM)line);
-	SendMessage(p2p_ui_con_richedit, WM_VSCROLL, SB_BOTTOM, 0);
+	if (p2p_ui_con_richedit == NULL || line == NULL)
+		return;
+	re_append(p2p_ui_con_richedit, line, 0);
 }
 
 
@@ -458,11 +465,11 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 				p2p_set_ready(SendMessage(GetDlgItem(hDlg, IDC_READY), BM_GETCHECK, 0, 0)==BST_CHECKED);
 			}
 			break;
-		case CMB_DMODE:
-			{
-				p2p_option_smoothing = SendMessage(GetDlgItem(hDlg, CMB_DMODE), CB_GETCURSEL, 0, 0);
-			}
-			break;
+			case CMB_DMODE:
+				{
+					p2p_option_smoothing = (int)SendMessage(GetDlgItem(hDlg, CMB_DMODE), CB_GETCURSEL, 0, 0);
+				}
+				break;
 		case CHK_ENLISTF:
 			p2p_option_forcePort = SendMessage(GetDlgItem(hDlg, CHK_ENLISTF), BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0;
 		case CHK_ENLIST:
@@ -486,8 +493,7 @@ void InitializeP2PSubsystem(HWND hDlg, bool host){
 
 	HOST = host;
 
-	
-	if (!host && SendMessage(GetDlgItem(p2p_ui_ss_dlg, IDC_CLIENTRANDOM), BM_GETCHECK, 0, 0)==BST_CHECKED){
+	if (!host) {
 		PORT = 0;
 	} else {
 		PORT = GetDlgItemInt(p2p_ui_ss_dlg, IDC_PORT, 0, FALSE);
@@ -503,15 +509,15 @@ void InitializeP2PSubsystem(HWND hDlg, bool host){
 	if (HOST) {
 		if (gamelist != 0) {
 			char * xx = gamelist;
-			int p;
-			while ((p=strlen(xx))!= 0){
+			size_t p;
+			while ((p = strlen(xx)) != 0){
 				if (strcmp(xx, GAME)==0){
 					//kprintf(__FILE__ ":%i", __LINE__);//localhost:27888
 					DialogBox(hx, (LPCTSTR)CONNECTION_DIALOG, NULL, (DLGPROC)ConnectionDialogProc);
 					ShowWindow(p2p_ui_ss_dlg, SW_SHOW);
 					return;
 				}
-				xx += p+ 1;
+				xx += p + 1;
 			}
 		}
 		MessageBox(hDlg, "Pick a valid game", 0,0);
@@ -531,6 +537,10 @@ void InitializeP2PSubsystem(HWND hDlg, bool host){
 void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 
 	if (connector){
+		P2PSelectionDialogProcSetModee(hDlg, IDC_PORT, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_HOSTPORT_LBL, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY_LBL, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY, SW_HIDE);
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_CONNECT, SW_SHOW);
@@ -548,6 +558,10 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 		
 
 	} else {
+		P2PSelectionDialogProcSetModee(hDlg, IDC_PORT, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_HOSTPORT_LBL, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY_LBL, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY, SW_SHOW);
 
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_HIDE);
@@ -669,15 +683,18 @@ void P2PSaveStoredUsersList(){
 /////////////////////////////////////////////////
 
 void p2p_hosted_game_callback(char * game){
-	strcpy(GAME, game);
+	if (game == NULL)
+		game = (char*)"";
+	strncpy(GAME, game, sizeof(GAME) - 1);
+	GAME[sizeof(GAME) - 1] = 0;
 	if (gamelist != 0) {
 		char * xx = gamelist;
-		int p;
-		while ((p=strlen(xx))!= 0){
+		size_t p;
+		while ((p = strlen(xx)) != 0){
 			if (strcmp(game, xx)==0) {
 				return;
 			}
-			xx += p+ 1;
+			xx += p + 1;
 		}
 	}
 	
@@ -705,36 +722,41 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 			nSettings::get_str("IDC_IP", IP,"127.0.0.1:27886");
 			SetDlgItemText(hDlg, IDC_IP, IP);
 
-			HWND hxx = GetDlgItem(hDlg, IDC_GAME);
-			if (gamelist != 0) {
-				nSettings::get_str("IDC_GAME", GAME, "");
-				char * xx = gamelist;
-				int p;
-				while ((p=strlen(xx))!= 0){
-					SendMessage(hxx, CB_ADDSTRING, 0, (WPARAM)xx);
-					if (strcmp(GAME, xx)==0) {
-						SetWindowText(hxx, GAME);
+				HWND hxx = GetDlgItem(hDlg, IDC_GAME);
+				if (gamelist != 0) {
+					nSettings::get_str("IDC_GAME", GAME, "");
+					char * xx = gamelist;
+					size_t p;
+					while ((p = strlen(xx)) != 0){
+						SendMessage(hxx, CB_ADDSTRING, 0, (WPARAM)xx);
+						if (strcmp(GAME, xx)==0) {
+							SetWindowText(hxx, GAME);
+						}
+						xx += p + 1;
 					}
-					xx += p+ 1;
 				}
-			}
-			{
-				DWORD xxx = 32;
-				GetUserName(USERNAME, &xxx);
-				char un[128];
-				nSettings::get_str("IDC_USRNAME", un, USERNAME);
-				strncpy(USERNAME, un, 32);
-				SetWindowText(GetDlgItem(hDlg, IDC_USRNAME), USERNAME);
-			}
-			SendMessage(GetDlgItem(hDlg, IDC_CLIENTRANDOM), BM_SETCHECK, nSettings::get_int("IDC_CLIENTRANDOM", BST_CHECKED), 0);
-
-			{
-				// Frame delay override (0 = auto-calculated)
-				p2p_frame_delay_override = nSettings::get_int("P2P_FDLY", 0);
-				char fdly_str[16];
-				sprintf(fdly_str, "%d", p2p_frame_delay_override);
-				SetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_str);
-			}
+					{
+						DWORD xxx = 32;
+						GetUserName(USERNAME, &xxx);
+						char un[128];
+						nSettings::get_str("IDC_USRNAME", un, USERNAME);
+						strncpy(USERNAME, un, 31);
+						USERNAME[31] = 0;
+						SetWindowText(GetDlgItem(hDlg, IDC_USRNAME), USERNAME);
+					}
+	
+				{
+					// Frame delay override (0 = auto-calculated)
+					p2p_frame_delay_override = nSettings::get_int("P2P_FDLY", 0);
+					if (p2p_frame_delay_override == 0) {
+						SetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), "");
+					} else {
+						char fdly_str[16];
+						sprintf(fdly_str, "%d", p2p_frame_delay_override);
+						SetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_str);
+					}
+					SendMessage(GetDlgItem(hDlg, IDC_P2P_FDLY), EM_LIMITTEXT, 2, 0);
+				}
 
 			nTab tabb;
 			tabb.handle = p2p_ui_modeseltab = GetDlgItem(hDlg, IDC_TAB1);
@@ -748,25 +770,24 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 			p2p_ui_storedusers.AddColumn("IP", 180);
 			p2p_ui_storedusers.FullRowSelect();
 
-			
-			P2PLoadStoredUsersList();
+				
+				P2PLoadStoredUsersList();
 
-			initialize_mode_cb(GetDlgItem(hDlg, CMB_MODE));
+				UpdateModeRadioButtons(hDlg);
 
-		}
-		break;
-	case WM_CLOSE:
-		{
-			// Save frame delay override
-			char fdly_buf[16];
-			GetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_buf, 16);
-			p2p_frame_delay_override = atoi(fdly_buf);
-			nSettings::set_int("P2P_FDLY", p2p_frame_delay_override);
-		}
-		nSettings::set_int("IDC_CLIENTRANDOM", SendMessage(GetDlgItem(hDlg, IDC_CLIENTRANDOM), BM_GETCHECK, 0, 0));
-		GetWindowText(GetDlgItem(hDlg, IDC_USRNAME), USERNAME, 31);
-		nSettings::set_str("IDC_USRNAME", USERNAME);
-		nSettings::set_int("IDC_PORT", GetDlgItemInt(hDlg, IDC_PORT, 0, FALSE));
+			}
+			break;
+		case WM_CLOSE:
+			{
+				// Save frame delay override
+				char fdly_buf[16];
+				GetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_buf, 16);
+				p2p_frame_delay_override = atoi(fdly_buf);
+				nSettings::set_int("P2P_FDLY", p2p_frame_delay_override);
+			}
+				GetWindowText(GetDlgItem(hDlg, IDC_USRNAME), USERNAME, 31);
+			nSettings::set_str("IDC_USRNAME", USERNAME);
+			nSettings::set_int("IDC_PORT", GetDlgItemInt(hDlg, IDC_PORT, 0, FALSE));
 		GetWindowText(GetDlgItem(hDlg, IDC_GAME), GAME, 127);
 		nSettings::set_str("IDC_GAME", GAME);
 		GetWindowText(GetDlgItem(hDlg, IDC_IP), IP, 127);
@@ -784,14 +805,28 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 
 		nSettings::Terminate();
 		break;
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case IDC_CONNECT:
-			InitializeP2PSubsystem(hDlg, false);
-			break;
-		case IDC_HOST:
-			InitializeP2PSubsystem(hDlg, true);
-			break;
+		case WM_COMMAND:
+			switch (LOWORD(wParam)) {
+			case IDC_CONNECT:
+				// Persist any edited frame delay override (even if the dialog stays open)
+				{
+					char fdly_buf[16];
+					GetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_buf, 16);
+					p2p_frame_delay_override = atoi(fdly_buf);
+					nSettings::set_int("P2P_FDLY", p2p_frame_delay_override);
+				}
+				InitializeP2PSubsystem(hDlg, false);
+				break;
+			case IDC_HOST:
+				// Persist any edited frame delay override (even if the dialog stays open)
+				{
+					char fdly_buf[16];
+					GetWindowText(GetDlgItem(hDlg, IDC_P2P_FDLY), fdly_buf, 16);
+					p2p_frame_delay_override = atoi(fdly_buf);
+					nSettings::set_int("P2P_FDLY", p2p_frame_delay_override);
+				}
+				InitializeP2PSubsystem(hDlg, true);
+				break;
 		case IDC_ADD:
 			P2PStoredUsersListAdd();
 			break;
@@ -801,18 +836,23 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 		case BTN_SSRVWG:
 			p2p_ShowWaitingGamesList();
 			break;
-		case IDC_DELETE:
-			P2PStoredUsersListDelete();
-			break;
-		case CMB_MODE:
-			if (HIWORD(wParam)==CBN_SELCHANGE) {
-				if (activate_mode(SendMessage(GetDlgItem(hDlg, CMB_MODE), CB_GETCURSEL, 0, 0))){
+			case IDC_DELETE:
+				P2PStoredUsersListDelete();
+				break;
+			case RB_MODE_P2P:
+				if (activate_mode(0))
 					SendMessage(hDlg, WM_CLOSE, 0, 0);
-				}
-			}
+				break;
+			case RB_MODE_CLIENT:
+				if (activate_mode(1))
+					SendMessage(hDlg, WM_CLOSE, 0, 0);
+				break;
+			case RB_MODE_PLAYBACK:
+				if (activate_mode(2))
+					SendMessage(hDlg, WM_CLOSE, 0, 0);
+				break;
+			};
 			break;
-		};
-		break;
 	case WM_NOTIFY:
 		NMHDR * nParam = (NMHDR*)lParam;
 		if (nParam->hwndFrom == p2p_ui_modeseltab && nParam->code == TCN_SELCHANGE){
@@ -842,4 +882,3 @@ void p2p_GUI(){
 
 	FreeLibrary(p2p_riched_hm);
 }
-
