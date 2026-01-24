@@ -539,6 +539,8 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 	if (connector){
 		P2PSelectionDialogProcSetModee(hDlg, IDC_PORT, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_HOSTPORT_LBL, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY_LBL, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY, SW_HIDE);
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_CONNECT, SW_SHOW);
@@ -558,6 +560,8 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 	} else {
 		P2PSelectionDialogProcSetModee(hDlg, IDC_PORT, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_HOSTPORT_LBL, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY_LBL, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_FDLY, SW_SHOW);
 
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_HIDE);
