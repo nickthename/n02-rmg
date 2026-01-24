@@ -612,6 +612,9 @@ void kaillera_end_game_callback(){
 // Menu item IDs for game list menu
 #define MENU_ID_JOIN 1
 #define MENU_ID_SEND_MSG 2
+#define MENU_ID_FINDUSER 3
+#define MENU_ID_IGNORE 4
+#define MENU_ID_UNIGNORE 5
 #define MENU_ID_CREATE_BASE 1000
 
 HMENU kaillera_sdlg_CreateGamesMenu = 0;
@@ -734,24 +737,41 @@ void kaillera_sdlg_show_users_list_menu(HWND hDlg) {
 
 	HMENU menu = CreatePopupMenu();
 	AppendMenu(menu, MF_STRING, MENU_ID_SEND_MSG, "Send Message");
+	AppendMenu(menu, MF_STRING, MENU_ID_FINDUSER, "Find user");
+	AppendMenu(menu, MF_STRING, MENU_ID_IGNORE, "Ignore");
+	AppendMenu(menu, MF_STRING, MENU_ID_UNIGNORE, "Unignore");
 
 	int result = TrackPopupMenu(menu, TPM_RETURNCMD, pi.x, pi.y, 0, hDlg, NULL);
-	if (result == MENU_ID_SEND_MSG) {
+	if (result != 0) {
 		// Get the user ID and username from the selected row
-			unsigned short userId = (unsigned short)(UINT_PTR)kaillera_sdlg_userslv.RowNo(sel);
+		unsigned short userId = (unsigned short)(UINT_PTR)kaillera_sdlg_userslv.RowNo(sel);
 		char username[128];
-		kaillera_sdlg_userslv.CheckRow(username, 128, 0, sel);
+		kaillera_sdlg_userslv.CheckRow(username, (int)sizeof(username), 0, sel);
 
-		// Fill the chat input with /msg <UserID>
-		char msgCmd[64];
-		wsprintf(msgCmd, "/msg %d ", userId);
-		SetWindowText(GetDlgItem(hDlg, TXT_CHAT), msgCmd);
+		if (result == MENU_ID_SEND_MSG) {
+			// Fill the chat input with /msg <UserID>
+			char msgCmd[64];
+			wsprintf(msgCmd, "/msg %u ", userId);
+			SetWindowText(GetDlgItem(hDlg, TXT_CHAT), msgCmd);
 
-		// Set focus to the chat input
-		SetFocus(GetDlgItem(hDlg, TXT_CHAT));
+			// Set focus to the chat input
+			SetFocus(GetDlgItem(hDlg, TXT_CHAT));
 
-		// Move cursor to end of text
-		SendMessage(GetDlgItem(hDlg, TXT_CHAT), EM_SETSEL, strlen(msgCmd), strlen(msgCmd));
+			// Move cursor to end of text
+			SendMessage(GetDlgItem(hDlg, TXT_CHAT), EM_SETSEL, (WPARAM)strlen(msgCmd), (LPARAM)strlen(msgCmd));
+		} else if (result == MENU_ID_FINDUSER) {
+			char command[256];
+			wsprintf(command, "/finduser %s", username);
+			kaillera_chat_send(command);
+		} else if (result == MENU_ID_IGNORE) {
+			char command[64];
+			wsprintf(command, "/ignore %u", userId);
+			kaillera_chat_send(command);
+		} else if (result == MENU_ID_UNIGNORE) {
+			char command[64];
+			wsprintf(command, "/unignore %u", userId);
+			kaillera_chat_send(command);
+		}
 	}
 
 	DestroyMenu(menu);
