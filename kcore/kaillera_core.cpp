@@ -42,10 +42,10 @@ typedef struct {
 	bool leave_game_requested;
 	bool has_dropped;  // Track if player dropped (for restart handling)
 	unsigned short user_id;
-	unsigned int tmoutrsttime;
-	bool pending_fdly_announce;
-	unsigned int fdly_announce_time;
-} KAILLERAC_;
+		int tmoutrsttime;
+		bool pending_fdly_announce;
+		int fdly_announce_time;
+	} KAILLERAC_;
 
 KAILLERAC_ KAILLERAC;
 
