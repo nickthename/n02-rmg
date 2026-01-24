@@ -1114,12 +1114,13 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 					}
 					}
 					break;
-			case CHK_MINGUIUPD:
-				MINGUIUPDATE = SendMessage(GetDlgItem(hDlg,CHK_MINGUIUPD), BM_GETCHECK, 0, 0)==BST_CHECKED;
-				break;
-		};
-		break;
-		case WM_NOTIFY:
+				case CHK_MINGUIUPD:
+					// Option removed from UI; always treat as unchecked.
+					MINGUIUPDATE = false;
+					break;
+			};
+			break;
+			case WM_NOTIFY:
 			if(((LPNMHDR)lParam)->code==NM_DBLCLK && ((LPNMHDR)lParam)->hwndFrom==kaillera_sdlg_gameslv.handle){
 				kailelra_sdlg_join_selected_game();
 			}
