@@ -608,15 +608,15 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 				p2p_frame_delay_override = 0;
 				HWND hFdlyCombo = GetDlgItem(hDlg, IDC_P2P_FDLY);
 				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"Auto");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"1f (8ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"2f (24ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"3f (40ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"4f (56ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"5f (72ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"6f (88ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"7f (104ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"8f (120ms)");
-				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"9f (136ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"1 frame (8ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"2 frames (24ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"3 frames (40ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"4 frames (56ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"5 frames (72ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"6 frames (88ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"7 frames (104ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"8 frames (120ms)");
+				SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"9 frames (136ms)");
 				SendMessage(hFdlyCombo, CB_SETCURSEL, 0, 0);
 
 				p2p_ui_con_richedit = GetDlgItem(hDlg, IDC_RICHEDIT2);

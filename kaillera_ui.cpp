@@ -1605,15 +1605,15 @@ LRESULT CALLBACK KailleraServerSelectDialogProc(HWND hDlg, UINT uMsg, WPARAM wPa
 					// Ping spoof dropdown (0 = auto, 1-9 = target frame delay)
 					HWND hFdlyCombo = GetDlgItem(hDlg, IDC_QUITMSG);
 					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"Auto");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"1f (8ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"2f (24ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"3f (40ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"4f (56ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"5f (72ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"6f (88ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"7f (104ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"8f (120ms)");
-					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"9f (136ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"1 frame (8ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"2 frames (24ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"3 frames (40ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"4 frames (56ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"5 frames (72ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"6 frames (88ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"7 frames (104ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"8 frames (120ms)");
+					SendMessage(hFdlyCombo, CB_ADDSTRING, 0, (LPARAM)"9 frames (136ms)");
 					int saved_fdly = nSettings::get_int("FDLY", 0);
 					if (saved_fdly < 0 || saved_fdly > 9) {
 						saved_fdly = 0;
