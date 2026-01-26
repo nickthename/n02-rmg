@@ -99,7 +99,7 @@ BEGIN
     LTEXT           "Nick:",IDC_STATIC,7,10,50,8
     GROUPBOX        "Local List",IDC_STATIC,7,35,314,131
     PUSHBUTTON      "Trace",BTN_TRACE,11,71,32,11
-    LTEXT           "Delay override:",IDC_STATIC,7,24,50,8
+    LTEXT           "Ping Spoof:",IDC_STATIC,7,24,50,8
     PUSHBUTTON      "About",BTN_ABOUT,271,168,50,11
     PUSHBUTTON      "Options",IDC_BUTTON3,226,168,44,11,NOT WS_VISIBLE | WS_DISABLED
     GROUPBOX        "Mode",IDC_STATIC,179,3,142,30
