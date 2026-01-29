@@ -19,6 +19,11 @@ extern HINSTANCE hx;
 
 static const char* kNoSpaceEditOldProcProp = "n02_NoSpaceEditOldProc";
 
+static const COLORREF P2P_COLOR_GREEN = 0x00009900; // matches kaillera_ui_motd()
+static void p2p_debug_color(COLORREF color, char* arg_0, ...);
+
+void InitializeP2PSubsystem(HWND hDlg, bool host, bool hostByCode);
+
 static void StripSpacesInPlace(char* s) {
 	if (s == NULL)
 		return;
@@ -28,6 +33,24 @@ static void StripSpacesInPlace(char* s) {
 			s[writeIndex++] = s[readIndex];
 	}
 	s[writeIndex] = 0;
+}
+
+static void TrimSpacesInPlace(char* s) {
+	if (s == NULL)
+		return;
+	size_t len = strlen(s);
+	size_t start = 0;
+	while (start < len && isspace((unsigned char)s[start])) {
+		start++;
+	}
+	size_t end = len;
+	while (end > start && isspace((unsigned char)s[end - 1])) {
+		end--;
+	}
+	if (start > 0 && end >= start) {
+		memmove(s, s + start, end - start);
+	}
+	s[end - start] = 0;
 }
 
 static void RemoveSpacesInEditControl(HWND hEdit) {
@@ -159,6 +182,7 @@ void __cdecl p2p_core_debug(char * arg_0, ...) {
 	AppendP2PFormattedLine(arg_0, args);
 	va_end (args);
 }
+
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -185,6 +209,10 @@ static bool g_p2p_trav_host_enabled = false;
 static bool g_p2p_trav_join_enabled = false;
 static char g_p2p_trav_code[32] = { 0 };
 static char g_p2p_trav_token[64] = { 0 };
+static int g_p2p_trav_reg_attempts = 0;
+static bool g_p2p_trav_host_fallback_active = false;
+static bool g_p2p_trav_host_ip_pending = false;
+static char g_p2p_trav_host_ip_port[64] = { 0 };
 
 static DWORD g_p2p_trav_next_reg_ms = 0;
 static DWORD g_p2p_trav_next_keep_ms = 0;
@@ -230,6 +258,31 @@ static void CopyTextToClipboard(HWND owner, const char* text) {
 	CloseClipboard();
 }
 
+static bool GetClipboardText(HWND owner, char* outText, size_t outTextLen) {
+	if (outText == NULL || outTextLen == 0)
+		return false;
+	outText[0] = 0;
+
+	if (!OpenClipboard(owner))
+		return false;
+
+	HANDLE hData = GetClipboardData(CF_TEXT);
+	if (hData == NULL) {
+		CloseClipboard();
+		return false;
+	}
+
+	const char* data = (const char*)GlobalLock(hData);
+	if (data != NULL) {
+		strncpy(outText, data, outTextLen - 1);
+		outText[outTextLen - 1] = 0;
+		GlobalUnlock(hData);
+	}
+
+	CloseClipboard();
+	return outText[0] != 0;
+}
+
 static bool LooksLikeTraversalCode(const char* s) {
 	if (s == NULL || *s == 0)
 		return false;
@@ -263,6 +316,10 @@ static void p2p_trav_reset_state() {
 	g_p2p_trav_join_enabled = false;
 	g_p2p_trav_code[0] = 0;
 	g_p2p_trav_token[0] = 0;
+	g_p2p_trav_reg_attempts = 0;
+	g_p2p_trav_host_fallback_active = false;
+	g_p2p_trav_host_ip_pending = false;
+	g_p2p_trav_host_ip_port[0] = 0;
 	g_p2p_trav_next_reg_ms = 0;
 	g_p2p_trav_next_keep_ms = 0;
 	g_p2p_trav_next_join_ms = 0;
@@ -287,7 +344,9 @@ static void p2p_trav_send_to_server(const char* msg) {
 	if (msgLen == 0 || msgLen > (size_t)INT_MAX)
 		return;
 
-	outpf("NAT traversal -> %s:%i: %s", kN02TraversalHost, kN02TraversalPort, msg);
+	if (!(g_p2p_trav_host_enabled && strncmp(msg, "N02TRAV1|KEEP|", 14) == 0)) {
+				p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal -> %s:%i: %s", kN02TraversalHost, kN02TraversalPort, msg);
+	}
 
 	// IMPORTANT: traversal messages must NOT include the trailing NUL byte.
 	p2p_send_ssrv_packet((char*)msg, (int)msgLen, (char*)kN02TraversalHost, kN02TraversalPort);
@@ -297,6 +356,9 @@ static void p2p_trav_send_reg() {
 	char msg[128];
 	_snprintf_s(msg, sizeof(msg), _TRUNCATE, "N02TRAV1|REG|%u", (unsigned int)GetTickCount());
 	p2p_trav_send_to_server(msg);
+	if (g_p2p_trav_host_enabled) {
+		g_p2p_trav_reg_attempts++;
+	}
 }
 
 static void p2p_trav_send_keep() {
@@ -329,7 +391,7 @@ static void p2p_trav_punch_endpoint(const char* hostIp, int hostPort, const char
 	if (token == NULL)
 		token = "";
 
-	outpf("NAT traversal -> %s:%i: punch x10", hostIp, hostPort);
+	p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal -> %s:%i: punch x10", hostIp, hostPort);
 
 	char msg[160];
 	_snprintf_s(msg, sizeof(msg), _TRUNCATE, "N02TRAV1|PUNCH|%s", token);
@@ -444,6 +506,94 @@ HWND p2p_ui_modeseltab;
 nLVw p2p_ui_storedusers;
 HWND p2p_ui_ss_dlg;
 ///////////////////////////////////////////////////////////////////////////////
+static bool g_p2p_advanced_visible = false;
+static HFONT g_p2p_copyip_font = NULL;
+static void p2p_update_host_code_ui(HWND hDlg) {
+	const bool showCode = HOST;
+	ShowWindow(GetDlgItem(hDlg, IDC_P2P_CODE_LBL), showCode ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_P2P_CODE), showCode ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_P2P_CODE_COPY), showCode ? SW_SHOW : SW_HIDE);
+	if (!showCode)
+		return;
+
+	if (g_p2p_trav_code[0] != 0) {
+		SetDlgItemText(hDlg, IDC_P2P_CODE, g_p2p_trav_code);
+		EnableWindow(GetDlgItem(hDlg, IDC_P2P_CODE_COPY), TRUE);
+	} else if (g_p2p_trav_host_ip_port[0] != 0) {
+		SetDlgItemText(hDlg, IDC_P2P_CODE, g_p2p_trav_host_ip_port);
+		EnableWindow(GetDlgItem(hDlg, IDC_P2P_CODE_COPY), TRUE);
+	} else if (g_p2p_trav_host_ip_pending) {
+		SetDlgItemText(hDlg, IDC_P2P_CODE, "(checking ip)");
+		EnableWindow(GetDlgItem(hDlg, IDC_P2P_CODE_COPY), FALSE);
+	} else {
+		SetDlgItemText(hDlg, IDC_P2P_CODE, "(waiting)");
+		EnableWindow(GetDlgItem(hDlg, IDC_P2P_CODE_COPY), FALSE);
+	}
+}
+
+static void p2p_set_advanced_ui(HWND hDlg, bool visible) {
+	ShowWindow(GetDlgItem(hDlg, IDC_RETR), visible ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_PING), visible ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_STATS), visible ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_P2P_ADV_COPYIP), (visible && HOST) ? SW_SHOW : SW_HIDE);
+}
+
+static void AppendP2PFormattedLineColor(COLORREF color, char* fmt, va_list args) {
+	char msg[2048];
+	msg[0] = 0;
+	vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, args);
+
+	char ts[20];
+	get_timestamp(ts, sizeof(ts));
+
+	char line[4096];
+	_snprintf_s(line, sizeof(line), _TRUNCATE, "%s%s\r\n", ts, msg);
+	re_append(p2p_ui_con_richedit, line, color);
+}
+
+static void p2p_debug_color(COLORREF color, char* arg_0, ...) {
+	va_list args;
+	va_start(args, arg_0);
+	AppendP2PFormattedLineColor(color, arg_0, args);
+	va_end(args);
+}
+
+static void p2p_try_apply_clipboard_connect(HWND hDlg) {
+	char clip[256];
+	if (!GetClipboardText(hDlg, clip, sizeof(clip)))
+		return;
+
+	TrimSpacesInPlace(clip);
+	if (clip[0] == 0)
+		return;
+
+	char ip[32];
+	int port = 0;
+	bool isMatch = false;
+	if (TryExtractIPv4AndPort(clip, ip, sizeof(ip), &port)) {
+		char expected[64];
+		if (port > 0) {
+			_snprintf_s(expected, sizeof(expected), _TRUNCATE, "%s:%d", ip, port);
+			if (_stricmp(clip, expected) == 0) {
+				SetDlgItemText(hDlg, IDC_IP, expected);
+				isMatch = true;
+			}
+		}
+		if (!isMatch && _stricmp(clip, ip) == 0) {
+			SetDlgItemText(hDlg, IDC_IP, ip);
+			isMatch = true;
+		}
+	}
+
+	if (!isMatch && LooksLikeTraversalCode(clip)) {
+		SetDlgItemText(hDlg, IDC_IP, clip);
+		isMatch = true;
+	}
+
+	if (isMatch) {
+		InitializeP2PSubsystem(hDlg, false, false);
+	}
+}
 
 
 
@@ -618,7 +768,7 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 
 			if (strcmp(type, "REGOK") == 0 && partCount >= 6) {
 				if (!g_p2p_trav_host_enabled) {
-					outpf("NAT traversal <- REGOK (ignored; not hosting-by-code)");
+					p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- REGOK (ignored; not hosting-by-code)");
 					return;
 				}
 
@@ -626,10 +776,17 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 				g_p2p_trav_code[sizeof(g_p2p_trav_code) - 1] = 0;
 				strncpy(g_p2p_trav_token, parts[3], sizeof(g_p2p_trav_token) - 1);
 				g_p2p_trav_token[sizeof(g_p2p_trav_token) - 1] = 0;
+				g_p2p_trav_reg_attempts = 0;
+				g_p2p_trav_host_ip_pending = false;
+				g_p2p_trav_host_ip_port[0] = 0;
 
-				outpf("NAT traversal <- REGOK code=%s observed=%s:%s", g_p2p_trav_code, parts[4], parts[5]);
+				p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- REGOK code=%s observed=%s:%s", g_p2p_trav_code, parts[4], parts[5]);
 				CopyTextToClipboard(p2p_ui_connection_dlg, g_p2p_trav_code);
 				outpf("Copied connect code to clipboard");
+					outpf("Received connect code: %s", g_p2p_trav_code);
+				if (p2p_ui_connection_dlg != NULL) {
+					p2p_update_host_code_ui(p2p_ui_connection_dlg);
+				}
 
 				// Start keepalive cadence.
 				g_p2p_trav_next_keep_ms = 0;
@@ -638,7 +795,7 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 
 			if (strcmp(type, "HOST") == 0 && partCount >= 5) {
 				if (!g_p2p_trav_join_enabled) {
-					outpf("NAT traversal <- HOST (ignored; not joining-by-code)");
+					p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- HOST (ignored; not joining-by-code)");
 					return;
 				}
 
@@ -646,7 +803,7 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 				const char* hostIp = parts[3];
 				const int hostPort = atoi(parts[4]);
 
-				outpf("NAT traversal <- HOST %s:%i", hostIp, hostPort);
+				p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- HOST %s:%i", hostIp, hostPort);
 				strncpy(g_p2p_trav_join_token, token, sizeof(g_p2p_trav_join_token) - 1);
 				g_p2p_trav_join_token[sizeof(g_p2p_trav_join_token) - 1] = 0;
 				strncpy(g_p2p_trav_join_host_ip, hostIp, sizeof(g_p2p_trav_join_host_ip) - 1);
@@ -658,10 +815,10 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 				g_p2p_trav_next_join_ms = 0;
 
 				// Try immediately (and WM_TIMER will retry for a short window if needed).
-				outpf("NAT traversal: connecting to %s:%i", g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port);
+					outpf("NAT traversal: connecting to %s:%i", g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port);
 				p2p_trav_punch_endpoint(g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port, g_p2p_trav_join_token);
 				if (!p2p_core_connect(g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port)) {
-					outpf("NAT traversal: error connecting to %s:%i", g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port);
+						outpf("NAT traversal: error connecting to %s:%i", g_p2p_trav_join_host_ip, g_p2p_trav_join_host_port);
 				}
 
 				return;
@@ -669,7 +826,7 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 
 			if (strcmp(type, "PEER") == 0 && partCount >= 5) {
 				if (!g_p2p_trav_host_enabled) {
-					outpf("NAT traversal <- PEER (ignored; not hosting-by-code)");
+					p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- PEER (ignored; not hosting-by-code)");
 					return;
 				}
 
@@ -678,12 +835,12 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 				const int peerPort = atoi(parts[4]);
 
 				if (g_p2p_trav_token[0] != 0 && strcmp(token, g_p2p_trav_token) != 0) {
-					outpf("NAT traversal: ignoring PEER for unknown token");
+						outpf("NAT traversal: ignoring PEER for unknown token");
 					return;
 				}
 
-				outpf("NAT traversal <- PEER %s:%i", peerIp, peerPort);
-				outpf("NAT traversal: peer %s:%i", peerIp, peerPort);
+				p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- PEER %s:%i", peerIp, peerPort);
+					outpf("NAT traversal: peer %s:%i", peerIp, peerPort);
 
 				strncpy(g_p2p_trav_host_peer_ip, peerIp, sizeof(g_p2p_trav_host_peer_ip) - 1);
 				g_p2p_trav_host_peer_ip[sizeof(g_p2p_trav_host_peer_ip) - 1] = 0;
@@ -696,13 +853,15 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 			}
 
 			if (strcmp(type, "ERR") == 0 && partCount >= 3) {
-				outpf("NAT traversal <- ERR %s", parts[2]);
-				outpf("NAT traversal: server response was: %s", originalCmd);
+				p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- ERR %s", parts[2]);
+					outpf("NAT traversal: server response was: %s", originalCmd);
 				return;
 			}
 
 			if (strcmp(type, "OK") == 0) {
-				outpf("NAT traversal <- OK");
+				if (!g_p2p_trav_host_enabled) {
+						outpf("NAT traversal <- OK");
+				}
 				return;
 			}
 
@@ -712,7 +871,7 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 			}
 		}
 
-		outpf("NAT traversal <- (unhandled) %s", originalCmd);
+		p2p_debug_color(P2P_COLOR_GREEN, "NAT traversal <- (unhandled) %s", originalCmd);
 		return;
 	}
 
@@ -722,6 +881,8 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 	} else if (strncmp(cmd, "MSG", 3)==0){
 		return;
 	}
+
+	p2p_debug_color(P2P_COLOR_GREEN, "SSRV: %s", cmd);
 
 	if (g_p2p_ssrv_copy_myip_pending) {
 		char ip[32];
@@ -733,14 +894,22 @@ void p2p_ssrv_packet_recv_callback(char *cmd, int len, void *sadr){
 				char ip_port[64];
 				_snprintf_s(ip_port, sizeof(ip_port), _TRUNCATE, "%s:%d", ip, port);
 				CopyTextToClipboard(p2p_ui_connection_dlg, ip_port);
-				outpf("Copied %s to clipboard", ip_port);
+				outpf("Copied IP to clipboard.");
+				strncpy(g_p2p_trav_host_ip_port, ip_port, sizeof(g_p2p_trav_host_ip_port) - 1);
+				g_p2p_trav_host_ip_port[sizeof(g_p2p_trav_host_ip_port) - 1] = 0;
+				g_p2p_trav_host_ip_pending = false;
+				if (p2p_ui_connection_dlg != NULL) {
+					p2p_update_host_code_ui(p2p_ui_connection_dlg);
+				}
+				if (g_p2p_trav_host_fallback_active) {
+					outpf("Your IP address is: %s", ip_port);
+				}
 			}
 		}
 		// Best-effort: don't keep a dangling "copy pending" flag if the reply is unexpected/unsupported.
 		g_p2p_ssrv_copy_myip_pending = false;
 	}
 
-	p2p_core_debug("SSRV: %s", cmd);
 }
 
 void p2p_ssrv_enlistgame(){
@@ -800,18 +969,22 @@ void IniaialzeConnectionDialog(HWND hDlg){
 	p2p_ui_connection_dlg = hDlg;
 	if (p2p_core_initialize(HOST, PORT, APP, GAME, USERNAME)){
 		//ShowWindow(GetDlgItem(hDlg, IDC_ADDDELAY), HOST? SW_SHOW:SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, CHK_ENLIST), HOST ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_SSERV_WHATSMYIP), HOST ? SW_SHOW : SW_HIDE);
+		const bool showSsrvHostControls = HOST && !g_p2p_trav_host_enabled;
+		ShowWindow(GetDlgItem(hDlg, CHK_ENLIST), showSsrvHostControls ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_SSERV_WHATSMYIP), showSsrvHostControls ? SW_SHOW : SW_HIDE);
+		if (!showSsrvHostControls) {
+			SendMessage(GetDlgItem(hDlg, CHK_ENLIST), BM_SETCHECK, BST_UNCHECKED, 0);
+		}
 		ShowWindow(GetDlgItem(hDlg, IDC_HOSTT), HOST ? SW_SHOW : SW_HIDE);
 		ShowWindow(GetDlgItem(hDlg, IDC_P2P_FDLY_LBL), HOST ? SW_SHOW : SW_HIDE);
 		ShowWindow(GetDlgItem(hDlg, IDC_P2P_FDLY), HOST ? SW_SHOW : SW_HIDE);
+		p2p_update_host_code_ui(hDlg);
 		
 		if (HOST) {
 			outpf("Hosting %s on port %i", GAME, p2p_core_get_port());
 			if (g_p2p_trav_host_enabled) {
-				outpf("NAT traversal: enabled (share the connect code once it appears).");
 				p2p_trav_send_reg();
-				g_p2p_trav_next_reg_ms = GetTickCount() + 3000;
+				g_p2p_trav_next_reg_ms = GetTickCount() + 2000;
 			} else {
 				outpf("WARNING: Hosting requires hosting ports to be forwarded and enabled in firewalls.");
 			}
@@ -819,7 +992,7 @@ void IniaialzeConnectionDialog(HWND hDlg){
 		} else {
 
 			if (g_p2p_trav_join_enabled) {
-				outpf("NAT traversal: looking up host for code %s", g_p2p_trav_join_code);
+					outpf("NAT traversal: looking up host for code %s", g_p2p_trav_join_code);
 				p2p_trav_send_join();
 				g_p2p_trav_next_join_ms = GetTickCount() + 3000;
 				g_p2p_trav_join_deadline_ms = GetTickCount() + 15000;
@@ -901,6 +1074,19 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 				p2p_ui_con_chatinp = GetDlgItem(hDlg, IDC_CHATI);
 				IniaialzeConnectionDialog(hDlg);
 				re_enable_hyperlinks(p2p_ui_con_richedit);
+				if (g_p2p_copyip_font == NULL) {
+					HDC hdc = GetDC(hDlg);
+					int height = -MulDiv(9, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+					ReleaseDC(hDlg, hdc);
+					g_p2p_copyip_font = CreateFont(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+						DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+						DEFAULT_PITCH | FF_DONTCARE, "MS Sans Serif");
+				}
+				if (g_p2p_copyip_font != NULL) {
+					SendMessage(GetDlgItem(hDlg, IDC_SSERV_WHATSMYIP), WM_SETFONT, (WPARAM)g_p2p_copyip_font, TRUE);
+				}
+				g_p2p_advanced_visible = false;
+				p2p_set_advanced_ui(hDlg, g_p2p_advanced_visible);
 				p2p_cdlg_timer = SetTimer(hDlg, 0, 1000, 0);
 			}
 
@@ -936,8 +1122,22 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 			if (HOST && g_p2p_trav_host_enabled) {
 				if (g_p2p_trav_token[0] == 0) {
 					if (g_p2p_trav_next_reg_ms == 0 || now >= g_p2p_trav_next_reg_ms) {
-						p2p_trav_send_reg();
-						g_p2p_trav_next_reg_ms = now + 3000;
+						if (g_p2p_trav_reg_attempts >= 4) {
+							g_p2p_trav_host_enabled = false;
+							g_p2p_trav_host_fallback_active = true;
+							g_p2p_trav_next_reg_ms = 0;
+							g_p2p_trav_next_keep_ms = 0;
+							g_p2p_trav_host_ip_pending = true;
+							g_p2p_trav_host_ip_port[0] = 0;
+							if (p2p_ui_connection_dlg != NULL) {
+								p2p_update_host_code_ui(p2p_ui_connection_dlg);
+							}
+							outpf("Unable to contact NAT server, hosting by IP. You may need to manually port forward.");
+							p2p_ssrv_whatismyip();
+						} else {
+							p2p_trav_send_reg();
+							g_p2p_trav_next_reg_ms = now + 2000;
+						}
 					}
 				} else {
 					if (g_p2p_trav_next_keep_ms == 0 || now >= g_p2p_trav_next_keep_ms) {
@@ -1030,10 +1230,17 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 				SetWindowText(p2p_ui_con_chatinp, "");
 			}
 			break;
+		case IDC_P2P_ADVANCED:
+			g_p2p_advanced_visible = !g_p2p_advanced_visible;
+			p2p_set_advanced_ui(hDlg, g_p2p_advanced_visible);
+			break;
 		case IDC_RETR:
 			{
 				p2p_ui_chat_send("/retr");
 			}
+			break;
+		case IDC_P2P_ADV_COPYIP:
+			p2p_ssrv_whatismyip();
 			break;
 		case IDC_PING:
 			{
@@ -1048,6 +1255,15 @@ LRESULT CALLBACK ConnectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARA
 			break;
 		case IDC_SSERV_WHATSMYIP:
 			p2p_ssrv_whatismyip();
+			break;
+		case IDC_P2P_CODE_COPY:
+			if (g_p2p_trav_code[0] != 0) {
+				CopyTextToClipboard(hDlg, g_p2p_trav_code);
+				outpf("Copied connect code to clipboard");
+			} else if (g_p2p_trav_host_ip_port[0] != 0) {
+				CopyTextToClipboard(hDlg, g_p2p_trav_host_ip_port);
+				outpf("Copied %s to clipboard", g_p2p_trav_host_ip_port);
+			}
 			break;
 			case IDC_READY:
 				{
@@ -1139,6 +1355,7 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_CONNECT, SW_SHOW);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_PASTE_CONNECT, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_SHOW);		
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ADD, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_EDIT, SW_SHOW);
@@ -1149,7 +1366,6 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 		//P2PSelectionDialogProcSetModee(hDlg, BTN_SSRVWG, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_GAMEL, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_GAME, SW_HIDE);
-		P2PSelectionDialogProcSetModee(hDlg, IDC_HOST_CODE, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_HOST, SW_HIDE);
 		
 
@@ -1160,6 +1376,7 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_CONNECT, SW_HIDE);
+		P2PSelectionDialogProcSetModee(hDlg, IDC_P2P_PASTE_CONNECT, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ULIST, SW_HIDE);		
 		P2PSelectionDialogProcSetModee(hDlg, IDC_ADD, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_EDIT, SW_HIDE);
@@ -1170,7 +1387,6 @@ void P2PSelectionDialogProcSetMode(HWND hDlg, bool connector){
 		//P2PSelectionDialogProcSetModee(hDlg, BTN_SSRVWG, SW_HIDE);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_GAMEL, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_GAME, SW_SHOW);
-		P2PSelectionDialogProcSetModee(hDlg, IDC_HOST_CODE, SW_SHOW);
 		P2PSelectionDialogProcSetModee(hDlg, IDC_HOST, SW_SHOW);
 
 	}
@@ -1387,10 +1603,10 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 			case IDC_CONNECT:
 				InitializeP2PSubsystem(hDlg, false, false);
 				break;
-			case IDC_HOST:
-				InitializeP2PSubsystem(hDlg, true, false);
+			case IDC_P2P_PASTE_CONNECT:
+				p2p_try_apply_clipboard_connect(hDlg);
 				break;
-			case IDC_HOST_CODE:
+			case IDC_HOST:
 				InitializeP2PSubsystem(hDlg, true, true);
 				break;
 		case IDC_ADD:

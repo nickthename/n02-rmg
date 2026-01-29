@@ -110,6 +110,12 @@
 #define IDC_JOINMSG_LBL                 1093
 #define CHK_30FPS                       1094
 #define IDC_HOST_CODE                   1095
+#define IDC_P2P_CODE_LBL                1096
+#define IDC_P2P_CODE                    1097
+#define IDC_P2P_CODE_COPY               1098
+#define IDC_P2P_ADVANCED                1099
+#define IDC_P2P_PASTE_CONNECT           1100
+#define IDC_P2P_ADV_COPYIP              1101
 
 // Next default values for new objects
 //
@@ -117,7 +123,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        115
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1096
+#define _APS_NEXT_CONTROL_VALUE         1102
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif
