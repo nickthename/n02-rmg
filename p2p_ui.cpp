@@ -967,7 +967,7 @@ LRESULT CALLBACK P2PSelectionDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 			p2p_ui_ss_dlg = hDlg;
 			InstallNoSpaceFilterForEdit(GetDlgItem(hDlg, IDC_IP));
 
-			SetWindowText(hDlg, "n02.p2p " P2P_VERSION);
+			SetWindowText(hDlg, N02_WINDOW_TITLE);
 			
 			nSettings::Initialize();
 
