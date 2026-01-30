@@ -1,4 +1,6 @@
 #include "kaillera_ui.h"
+#include "p2p_ui.h"
+#include "p2p_appcode.h"
 
 #include <windows.h>
 #include <limits.h>
@@ -81,33 +83,58 @@ int DownloadListToBuffer(char * buffer, int size, char * url){
 	unsigned long ul = 5;
 	sockaddr_in server;
 	char * RequestBuffer = (char*)malloc(1024);
-	host = strstr(urlbuf, "http://")+7;
+	char * proto = strstr(urlbuf, "http://");
+	if (proto == NULL) {
+		free(RequestBuffer);
+		return 0;
+	}
+	host = proto + 7;
 	if(strstr(host, ":")!=NULL){
 		port = strstr(host, ":")+1;
 		server.sin_port = htons(atoi(port));
+		if (strstr(port, "/") == NULL) {
+			free(RequestBuffer);
+			return 0;
+		}
 		strcpy(addr, strstr(port, "/"));
 		*(port-1) = 0x00;
 	}
 	else{
 		server.sin_port = htons(80);
+		if (strstr(host, "/") == NULL) {
+			free(RequestBuffer);
+			return 0;
+		}
 		strcpy(addr, strstr(host, "/"));
 		*(strstr(host, "/"))=0x00;
 	}
 	wsprintf(RequestBuffer,"GET %s HTTP/1.0\r\nHost:%s\r\n\r\n", addr, host);
 	//socket
 	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-	if(s==SOCKET_ERROR)
+	if(s==SOCKET_ERROR) {
+		free(RequestBuffer);
 		return 0;
+	}
 	//ioctlsocket(s, FIONBIO, &ul);
 	if(*(host)> 0x30 && *(host)<0x3A){//ip address
 		server.sin_addr.s_addr = inet_addr(host);
 	} else {
-		server.sin_addr = *(struct in_addr*)gethostbyname(host)->h_addr_list[0];
+		struct hostent* he = gethostbyname(host);
+		if (he == NULL || he->h_addr_list == NULL || he->h_addr_list[0] == NULL) {
+			closesocket(s);
+			free(RequestBuffer);
+			return 0;
+		}
+		server.sin_addr = *(struct in_addr*)he->h_addr_list[0];
 	}
 	n02_TRACE();
 	server.sin_family = AF_INET;
 	if(connect(s, (struct sockaddr *)&server, sizeof(server))!=0){
-		if(WSAGetLastError()!=WSAEWOULDBLOCK) return 0;
+		if(WSAGetLastError()!=WSAEWOULDBLOCK) {
+			closesocket(s);
+			free(RequestBuffer);
+			return 0;
+		}
 	}
 	Sleep(300);
 	{
@@ -115,6 +142,7 @@ int DownloadListToBuffer(char * buffer, int size, char * url){
 		int sendLen = (reqLen > (size_t)INT_MAX) ? INT_MAX : (int)reqLen;
 		sendto(s, RequestBuffer, sendLen, 0, (sockaddr*)&server, sizeof(server));
 	}
+	free(RequestBuffer);
 	char * bf = buffer;
 	int il = size;
 	DWORD t = GetTickCount();
@@ -188,7 +216,10 @@ public:
 		int l = DownloadListToBuffer(buffer, 0x8000, "http://kaillerareborn.2manygames.fr/server_list.php");//DownloadListToBuffer(buffer, 0x8000, "http://kaillera.com/raw_server_list2.php?version=0.9");
 		runn = l > 150;
 		if (runn) {
-			char * ptr = strstr(buffer, "\r\n\r\n") + 4;
+			char * ptr = strstr(buffer, "\r\n\r\n");
+			if (ptr == NULL)
+				return;
+			ptr += 4;
 			int total=0;
 			if(ptr==NULL){
 				return;
@@ -369,7 +400,10 @@ public:
 		int l = DownloadListToBuffer(buffer, 0x8000, "http://kaillerareborn.2manygames.fr/game_list.php");//DownloadListToBuffer(buffer, 0x8000, "http://kaillera.com/raw_server_list2.php?version=0.9&wg=1");
 		runn = l > 200;
 		if (runn) {
-			char * ptr = strstr(buffer, "\r\n\r\n") + 4;
+			char * ptr = strstr(buffer, "\r\n\r\n");
+			if (ptr == NULL)
+				return;
+			ptr += 4;
 			int total=0;
 			if(ptr==NULL){
 				return;
@@ -782,25 +816,24 @@ LRESULT CALLBACK MasterSLDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM 
 
 
 extern HWND p2p_ui_ss_dlg;
-extern void InitializeP2PSubsystem(HWND hDlg, bool host);
 
 void p2p_wgdlg_connect_selected(HWND hDlg){
 	refresher_thread.runn = false;
 	int selected = kaillera_mlv.SelectedRow();
 	if (selected >= 0) {
-		char * buf = (char*)kaillera_mlv.RowNo(selected);
-		char * name = buf;
-		while(*++buf!= 0){}*buf++ = 0;
-		char * emu = buf;
-		while(*++buf!= 0){}*buf++ = 0;
-		char * usern = buf;
-		while(*++buf!= 0){}*buf++ = 0;
-		char * host = buf;
-		while(*++buf!=0){}*buf++ = 0;
-		//MessageBox(0, host, 0,0 );
+		char host[128];
+		char code[64];
+		host[0] = 0;
+		code[0] = 0;
+		kaillera_mlv.CheckRow(host, sizeof(host), 4, selected);
+		kaillera_mlv.CheckRow(code, sizeof(code), 5, selected);
 		ShowWindow(kaillera_mslref, SW_HIDE);
-		SetWindowText(GetDlgItem(p2p_ui_ss_dlg, IDC_IP), host);
-		InitializeP2PSubsystem(hDlg, false);
+		if (code[0] != 0) {
+			InitializeP2PSubsystemWithJoinCode(hDlg, code, host);
+		} else {
+			SetWindowText(GetDlgItem(p2p_ui_ss_dlg, IDC_IP), host);
+			InitializeP2PSubsystem(hDlg, false);
+		}
 		ShowWindow(kaillera_mslref, SW_SHOW);
 	}
 }
@@ -827,7 +860,10 @@ public:
 		
 		
 		if (runn) {
-			char * ptr = strstr(buffer, "\r\n\r\n") + 4;
+			char * ptr = strstr(buffer, "\r\n\r\n");
+			if (ptr == NULL)
+				return;
+			ptr += 4;
 			//MessageBox(0, ptr, buffer, 0);
 			int total=0;
 			if(ptr==NULL){
@@ -908,18 +944,49 @@ public:
 							char * loca = ps->ptr;
 							plist.remove(ps);
 							delete ps;
-							_x--;
-							if (ping == -1)
-								continue;
-							
-							name = loca;
-							int x = kaillera_mlv.Find((LPARAM)name);
-							
-							while(*++loca!= 0){}*loca++ = 0;
-							kaillera_mlv.AddRow(name, (LPARAM)name);
-							
+								_x--;
+								if (ping == -1) {
+									name = loca;
+
+									while(*++loca!= 0){}*loca++ = 0;
+
+									char * games = loca; // emu name
+									while(*++loca!=0){}*loca++ = 0;
+									char code_buf[64];
+									code_buf[0] = 0;
+									p2p_appcode_split_inplace(games, code_buf, sizeof(code_buf));
+
+									char * users = loca; // username
+									while(*++loca!=0){}*loca++ = 0;
+
+									char * host = loca;
+									while(*++loca!=0){}*loca++ = ':';
+
+									if (code_buf[0] == 0)
+										continue;
+
+									kaillera_mlv.AddRow(name, (LPARAM)name);
+									int x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(games, 1, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(users, 2, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(host, 4, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(code_buf, 5, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow("?", 3, x);
+
+									total++;
+									continue;
+								}
+
+								name = loca;
+								int x = kaillera_mlv.Find((LPARAM)name);
+
+								while(*++loca!= 0){}*loca++ = 0;
+								kaillera_mlv.AddRow(name, (LPARAM)name);
+
 							char * games = loca; // emu name
 							while(*++loca!=0){}*loca++ = 0;
+							char code_buf[64];
+							code_buf[0] = 0;
+							p2p_appcode_split_inplace(games, code_buf, sizeof(code_buf));
 							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(games, 1, x);
 							
 							char * users = loca; // username
@@ -929,6 +996,7 @@ public:
 							char * host = loca;
 							while(*++loca!=0){}*loca++ = ':';
 							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(host, 4, x);
+							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(code_buf, 5, x);
 							
 							char xxxj[20];
 							wsprintf(xxxj, "%ims", ping);
@@ -945,20 +1013,44 @@ public:
 					DWORD ti = GetTickCount();
 					for (int _x = 0; _x < plist.size(); _x++) {
 						PingSocket * ps = plist.get(_x);
-						if (ps != 0 && ps->limit != 0 && ps->is_done(ti)){
-							int ping = ps->return_ping();
-							char * loca = ps->ptr;
-							plist.remove(ps);
-							delete ps;
-							_x--;
-							if (ping == -1)
-								continue;
-							char * name = loca;
-							int x = kaillera_mlv.Find((LPARAM)name);
+							if (ps != 0 && ps->limit != 0 && ps->is_done(ti)){
+								int ping = ps->return_ping();
+								char * loca = ps->ptr;
+								plist.remove(ps);
+								delete ps;
+								_x--;
+								if (ping == -1) {
+									char * name = loca;
+									while(*++loca!= 0){}*loca++ = 0;
+									char * games = loca; // emu name
+									while(*++loca!=0){}*loca++ = 0;
+									char code_buf[64];
+									code_buf[0] = 0;
+									p2p_appcode_split_inplace(games, code_buf, sizeof(code_buf));
+									char * users = loca; // username
+									while(*++loca!=0){}*loca++ = 0;
+									char * host = loca;
+									while(*++loca!=0){}*loca++ = ':';
+									if (code_buf[0] == 0)
+										continue;
+									kaillera_mlv.AddRow(name, (LPARAM)name);
+									int x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(games, 1, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(users, 2, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(host, 4, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(code_buf, 5, x);
+									x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow("?", 3, x);
+									total++;
+									continue;
+								}
+								char * name = loca;
+								int x = kaillera_mlv.Find((LPARAM)name);
 							while(*++loca!= 0){}*loca++ = 0;
 							kaillera_mlv.AddRow(name, (LPARAM)name);
 							char * games = loca; // emu name
 							while(*++loca!=0){}*loca++ = 0;
+							char code_buf[64];
+							code_buf[0] = 0;
+							p2p_appcode_split_inplace(games, code_buf, sizeof(code_buf));
 							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(games, 1, x);
 							char * users = loca; // username
 							while(*++loca!=0){}*loca++ = 0;
@@ -966,6 +1058,7 @@ public:
 							char * host = loca;
 							while(*++loca!=0){}*loca++ = ':';
 							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(host, 4, x);
+							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(code_buf, 5, x);
 							char xxxj[20];
 							wsprintf(xxxj, "%ims", ping);
 							x = kaillera_mlv.Find((LPARAM)name); kaillera_mlv.FillRow(xxxj, 3, x);
@@ -1044,6 +1137,7 @@ LRESULT CALLBACK p2p_MasterSLDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPA
 			kaillera_mlv.AddColumn("User", 99);
 			kaillera_mlv.AddColumn("Ping", 50);
 			kaillera_mlv.AddColumn("Host", 0);
+			kaillera_mlv.AddColumn("Code", 0);
 			kaillera_mlv.FullRowSelect();
 			kaillera_mslistColumn = 3;
 			kaillera_mslistColumnTypes[3] = 0;

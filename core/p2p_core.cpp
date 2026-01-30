@@ -1,4 +1,5 @@
 #include "p2p_core.h"
+#include "../p2p_appcode.h"
 
 #include "p2p_message.h"
 #include "../common/k_framecache.h"
@@ -596,15 +597,24 @@ void p2p_step(){
 							
 							P2PCORE.connection->set_addr(&saddr);
 							ki.load_sstring(P2PCORE.PEERNAME);
-							
-							char peerapp[128];
-							ki.load_string(peerapp);
-							
-							p2p_core_debug("Connection Request from %s (%s).. Waiting for reconfirmation...", P2PCORE.PEERNAME, peerapp);
-							p2p_peer_info_callback(P2PCORE.PEERNAME, peerapp);
-							
-							if (strcmp(peerapp, P2PCORE.APP)!=0)
-								p2p_send_chat("Emulator/version difference alert! Game may desync!");
+								char peerapp[128];
+								ki.load_string(peerapp);
+
+								char peerapp_base[128];
+								strncpy(peerapp_base, peerapp, sizeof(peerapp_base) - 1);
+								peerapp_base[sizeof(peerapp_base) - 1] = 0;
+								p2p_appcode_split_inplace(peerapp_base, NULL, 0);
+
+								char localapp_base[128];
+								strncpy(localapp_base, P2PCORE.APP, sizeof(localapp_base) - 1);
+								localapp_base[sizeof(localapp_base) - 1] = 0;
+								p2p_appcode_split_inplace(localapp_base, NULL, 0);
+
+								p2p_core_debug("Connection Request from %s (%s).. Waiting for reconfirmation...", P2PCORE.PEERNAME, peerapp_base);
+								p2p_peer_info_callback(P2PCORE.PEERNAME, peerapp_base);
+
+								if (strcmp(peerapp_base, localapp_base)!=0)
+									p2p_send_chat("Emulator/version difference alert! Game may desync!");
 
 							p2p_instruction kx;
 							kx.inst.type = LOGN;
