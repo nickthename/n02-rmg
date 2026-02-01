@@ -1,4 +1,5 @@
 #include "p2p_core.h"
+#include "../p2p_appcode.h"
 
 #include "p2p_message.h"
 #include "../common/k_framecache.h"
@@ -451,8 +452,6 @@ bool p2p_SynChronizeClocksOrDie(){
 		//kprintf("cSyncServer");
 		p2p_InitializeTime();
 
-		p2p_core_debug("ping is %i", P2PCORE.ping);
-
 		Sleep(250);
 		
 		int PAD = p2p_getSelectedDelay();
@@ -481,7 +480,7 @@ bool p2p_SynChronizeClocksOrDie(){
 						if (ki.inst.flags == TSYNC_ADJUST){
 							//p2p_core_debug("TSYNC_ADJUST: %i, %i", predicted, 0);
 							int dx = ki.load_int();
-							p2p_core_debug("TSYNC_ADJUST: %i, %i", predicted, dx);
+							StatsAppendLine("TSYNC_ADJUST: %i, %i", predicted, dx);
 
 							if (dx > 0 && dx < ttime * ADJUST_RATIO_T)
 								ttime += dx * ADJUST_RATIO_T;
@@ -541,14 +540,14 @@ bool p2p_SynChronizeClocksOrDie(){
 							unsigned int tx = ki.load_int();
 							p2p_initial_time += (p2p_GetTime() - tx);
 							
-							p2p_core_debug("TSYNC_FORCE: %i, %i", tx, p2p_GetTime());
+							StatsAppendLine("TSYNC_FORCE: %i, %i", tx, p2p_GetTime());
 							
 						} else if (ki.inst.flags == TSYNC_CHECK){
 							int tx = ki.load_int();
 							int dx = p2p_GetTime() - tx;
 							p2p_initial_time += dx * ADJUST_RATIO_T;
 							
-							p2p_core_debug("TSYNC_CHECK: %i, %i", tx, p2p_GetTime());
+							StatsAppendLine("TSYNC_CHECK: %i, %i", tx, p2p_GetTime());
 							
 							tx += dx * ADJUST_RATIO_T;
 							
@@ -596,15 +595,24 @@ void p2p_step(){
 							
 							P2PCORE.connection->set_addr(&saddr);
 							ki.load_sstring(P2PCORE.PEERNAME);
-							
-							char peerapp[128];
-							ki.load_string(peerapp);
-							
-							p2p_core_debug("Connection Request from %s (%s).. Waiting for reconfirmation...", P2PCORE.PEERNAME, peerapp);
-							p2p_peer_info_callback(P2PCORE.PEERNAME, peerapp);
-							
-							if (strcmp(peerapp, P2PCORE.APP)!=0)
-								p2p_send_chat("Emulator/version difference alert! Game may desync!");
+								char peerapp[128];
+								ki.load_string(peerapp);
+
+								char peerapp_base[128];
+								strncpy(peerapp_base, peerapp, sizeof(peerapp_base) - 1);
+								peerapp_base[sizeof(peerapp_base) - 1] = 0;
+								p2p_appcode_split_inplace(peerapp_base, NULL, 0);
+
+								char localapp_base[128];
+								strncpy(localapp_base, P2PCORE.APP, sizeof(localapp_base) - 1);
+								localapp_base[sizeof(localapp_base) - 1] = 0;
+								p2p_appcode_split_inplace(localapp_base, NULL, 0);
+
+								p2p_core_debug("Connection Request from %s (%s).. Waiting for reconfirmation...", P2PCORE.PEERNAME, peerapp_base);
+								p2p_peer_info_callback(P2PCORE.PEERNAME, peerapp_base);
+
+								if (strcmp(peerapp_base, localapp_base)!=0)
+									p2p_send_chat("Emulator/version difference alert! Game may desync!");
 
 							p2p_instruction kx;
 							kx.inst.type = LOGN;
@@ -922,7 +930,7 @@ int p2p_modify_play_values(void *values, int size){
 		}
 		//TRACE
 		if (P2PCORE.status == 2 && p2p_SynChronizeClocksOrDie()) {
-			p2p_core_debug("== Calculated delay %i frame(s)\r\n", P2PCORE.throughput);
+			p2p_core_debug("== Calculated delay %i frame(s)", P2PCORE.throughput);
 		}
 		//TRACE
 		
@@ -956,7 +964,7 @@ int p2p_modify_play_values(void *values, int size){
 		//kprintf(__FILE__ ":%i, %i", __LINE__, p2p_GetTime());
 		
 		P2PCORE.connection->default_ipm = max(2, min(P2PCORE.throughput + 1, 8));
-		p2p_core_debug("default ipm changed to %i", P2PCORE.connection->default_ipm);
+		StatsAppendLine("default ipm changed to %i", P2PCORE.connection->default_ipm);
 
 		int tl = start_time - p2p_GetTime();
 		//kprintf("time left %i ms", tl);
