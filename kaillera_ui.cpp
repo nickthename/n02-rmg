@@ -139,6 +139,7 @@ static int g_users_column_restore_widths[5] = { 80, 35, 44, 85, 55 };
 static int g_lobby_column_restore_widths[4] = { 100, 60, 60, 120 };
 static int g_games_column_restore_widths[6] = { 285, 60, 130, 150, 50, 45 };
 static const int KAILLERA_MIN_COLUMN_WIDTH = 16;
+static bool g_kaillera_allow_zero_width_columns = false;
 
 static void ExecuteOptions();
 static void ApplyKailleraDialogResizeLayout(HWND hDlg, int clientWidth, int clientHeight);
@@ -425,6 +426,7 @@ static void LoadListViewColumnWidths(HWND listHandle, const char* keyPrefix, int
 	if (listHandle == NULL || keyPrefix == NULL || count <= 0)
 		return;
 
+	g_kaillera_allow_zero_width_columns = true;
 	for (int i = 0; i < count; ++i) {
 		char key[64];
 		wsprintf(key, "%s%i", keyPrefix, i);
@@ -434,6 +436,7 @@ static void LoadListViewColumnWidths(HWND listHandle, const char* keyPrefix, int
 		if (savedWidth >= 0)
 			ListView_SetColumnWidth(listHandle, i, savedWidth);
 	}
+	g_kaillera_allow_zero_width_columns = false;
 }
 
 static void SaveKailleraDialogLayout(HWND hDlg) {
@@ -1345,7 +1348,9 @@ static void ShowColumnVisibilityMenu(
 					break;
 
 				restoreWidths[i] = width;
+				g_kaillera_allow_zero_width_columns = true;
 				ListView_SetColumnWidth(listHandle, i, 0);
+				g_kaillera_allow_zero_width_columns = false;
 			} else {
 				int restoreWidth = restoreWidths[i];
 				if (restoreWidth <= 0)
@@ -1924,9 +1929,11 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 				if ((hdr->code == HDN_ITEMCHANGINGA || hdr->code == HDN_ITEMCHANGINGW) &&
 					(hdr->hwndFrom == gamesHeader || hdr->hwndFrom == usersHeader || hdr->hwndFrom == lobbyHeader)) {
 					NMHEADERA* nmh = (NMHEADERA*)lParam;
-					if (nmh->pitem != NULL && (nmh->pitem->mask & HDI_WIDTH) != 0 &&
-						nmh->pitem->cxy > 0 && nmh->pitem->cxy < KAILLERA_MIN_COLUMN_WIDTH) {
-						nmh->pitem->cxy = KAILLERA_MIN_COLUMN_WIDTH;
+					if (nmh->pitem != NULL && (nmh->pitem->mask & HDI_WIDTH) != 0) {
+						if (nmh->pitem->cxy == 0 && !g_kaillera_allow_zero_width_columns)
+							nmh->pitem->cxy = KAILLERA_MIN_COLUMN_WIDTH;
+						else if (nmh->pitem->cxy > 0 && nmh->pitem->cxy < KAILLERA_MIN_COLUMN_WIDTH)
+							nmh->pitem->cxy = KAILLERA_MIN_COLUMN_WIDTH;
 					}
 				}
 				if (hdr->code == NM_RCLICK && hdr->hwndFrom == gamesHeader) {
