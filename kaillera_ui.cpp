@@ -100,6 +100,381 @@ static int g_beep_on_user_join = 1;
 
 static void ExecuteOptions();
 
+enum {
+	KAILLERA_ANCHOR_LEFT = 1 << 0,
+	KAILLERA_ANCHOR_RIGHT = 1 << 1,
+	KAILLERA_ANCHOR_TOP = 1 << 2,
+	KAILLERA_ANCHOR_BOTTOM = 1 << 3
+};
+
+struct KailleraResizeItem {
+	int id;
+	unsigned int anchors;
+	RECT baseRect;
+};
+
+static KailleraResizeItem g_kaillera_resize_items[] = {
+	{ RE_PART, KAILLERA_ANCHOR_LEFT | KAILLERA_ANCHOR_TOP | KAILLERA_ANCHOR_RIGHT, { 0, 0, 0, 0 } },
+	{ LV_ULIST, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ TXT_CHAT, KAILLERA_ANCHOR_LEFT | KAILLERA_ANCHOR_TOP | KAILLERA_ANCHOR_RIGHT, { 0, 0, 0, 0 } },
+	{ IDC_CHAT, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ IDC_CREATE, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ LV_GLIST, KAILLERA_ANCHOR_LEFT | KAILLERA_ANCHOR_TOP | KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ RE_GCHAT, KAILLERA_ANCHOR_LEFT | KAILLERA_ANCHOR_TOP | KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ LV_GULIST, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ TXT_GINP, KAILLERA_ANCHOR_LEFT | KAILLERA_ANCHOR_BOTTOM | KAILLERA_ANCHOR_RIGHT, { 0, 0, 0, 0 } },
+	{ BTN_GCHAT, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ BTN_START, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ BTN_DROP, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ BTN_LEAVE, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ BTN_KICK, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ BTN_LAGSTAT, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_TOP, { 0, 0, 0, 0 } },
+	{ CHK_REC, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ ST_SPEED, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ ST_DELAY, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ BTN_OPTIONS, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ BTN_ADVERTISE, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ IDC_JOINMSG_LBL, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+	{ TXT_MSG, KAILLERA_ANCHOR_RIGHT | KAILLERA_ANCHOR_BOTTOM, { 0, 0, 0, 0 } },
+};
+
+static SIZE g_kaillera_base_client_size = { 0, 0 };
+static SIZE g_kaillera_min_track_size = { 0, 0 };
+static bool g_kaillera_resize_initialized = false;
+static int g_kaillera_top_right_width = 0;
+static int g_kaillera_top_right_margin = 0;
+static int g_kaillera_top_gap_repart_to_list = 0;
+static int g_kaillera_top_gap_txtchat_to_chat = 0;
+static int g_kaillera_top_gap_chat_to_create = 0;
+static int g_kaillera_top_gap_create_to_list = 0;
+static int g_kaillera_bottom_right_width = 0;
+static int g_kaillera_bottom_right_margin = 0;
+static int g_kaillera_bottom_gap_regchat_to_list = 0;
+static int g_kaillera_bottom_gap_txtginp_to_btn = 0;
+static int g_kaillera_bottom_gap_btn_to_list = 0;
+static const int KAILLERA_SPLITTER_GRAB_WIDTH = 4;
+
+enum KailleraSplitterDragMode {
+	KAILLERA_SPLITTER_NONE = 0,
+	KAILLERA_SPLITTER_TOP = 1,
+	KAILLERA_SPLITTER_BOTTOM = 2
+};
+
+static KailleraSplitterDragMode g_kaillera_active_splitter = KAILLERA_SPLITTER_NONE;
+
+static int ClampInt(int value, int minimum, int maximum) {
+	if (value < minimum)
+		return minimum;
+	if (value > maximum)
+		return maximum;
+	return value;
+}
+
+static KailleraResizeItem* FindKailleraResizeItem(int controlId) {
+	const size_t itemCount = sizeof(g_kaillera_resize_items) / sizeof(g_kaillera_resize_items[0]);
+	for (size_t i = 0; i < itemCount; ++i) {
+		if (g_kaillera_resize_items[i].id == controlId)
+			return &g_kaillera_resize_items[i];
+	}
+	return NULL;
+}
+
+static int GetTopRightPanelWidthForClient(int clientWidth) {
+	const int minRightWidth = 120;
+	int maxRightWidth = clientWidth - g_kaillera_top_right_margin - 140;
+	if (maxRightWidth < minRightWidth)
+		maxRightWidth = minRightWidth;
+	return ClampInt(g_kaillera_top_right_width, minRightWidth, maxRightWidth);
+}
+
+static int GetTopSplitterXForClient(int clientWidth) {
+	const int rightWidth = GetTopRightPanelWidthForClient(clientWidth);
+	return clientWidth - g_kaillera_top_right_margin - rightWidth;
+}
+
+static int GetBottomRightPanelWidthForClient(int clientWidth) {
+	const int minRightWidth = 120;
+	int maxRightWidth = clientWidth - g_kaillera_bottom_right_margin - 140;
+	if (maxRightWidth < minRightWidth)
+		maxRightWidth = minRightWidth;
+	return ClampInt(g_kaillera_bottom_right_width, minRightWidth, maxRightWidth);
+}
+
+static int GetBottomSplitterXForClient(int clientWidth) {
+	const int rightWidth = GetBottomRightPanelWidthForClient(clientWidth);
+	return clientWidth - g_kaillera_bottom_right_margin - rightWidth;
+}
+
+static bool IsTopSplitterHit(HWND hDlg, int mouseX, int mouseY) {
+	RECT clientRect;
+	if (!GetClientRect(hDlg, &clientRect))
+		return false;
+
+	KailleraResizeItem* rePartItem = FindKailleraResizeItem(RE_PART);
+	KailleraResizeItem* txtChatItem = FindKailleraResizeItem(TXT_CHAT);
+	if (rePartItem == NULL || txtChatItem == NULL)
+		return false;
+
+	const int splitterX = GetTopSplitterXForClient(clientRect.right - clientRect.left);
+	const int hotTop = rePartItem->baseRect.top;
+	const int hotBottom = txtChatItem->baseRect.bottom;
+	return mouseX >= splitterX - KAILLERA_SPLITTER_GRAB_WIDTH &&
+		mouseX <= splitterX + KAILLERA_SPLITTER_GRAB_WIDTH &&
+		mouseY >= hotTop &&
+		mouseY <= hotBottom;
+}
+
+static bool IsBottomSplitterHit(HWND hDlg, int mouseX, int mouseY) {
+	RECT clientRect;
+	if (!GetClientRect(hDlg, &clientRect))
+		return false;
+
+	KailleraResizeItem* gameChatItem = FindKailleraResizeItem(RE_GCHAT);
+	KailleraResizeItem* gameInputItem = FindKailleraResizeItem(TXT_GINP);
+	if (gameChatItem == NULL || gameInputItem == NULL)
+		return false;
+
+	const int clientWidth = clientRect.right - clientRect.left;
+	const int clientHeight = clientRect.bottom - clientRect.top;
+	const int deltaY = clientHeight - g_kaillera_base_client_size.cy;
+	const int splitterX = GetBottomSplitterXForClient(clientWidth);
+	const int hotTop = gameChatItem->baseRect.top;
+	const int hotBottom = gameInputItem->baseRect.bottom + deltaY;
+	return mouseX >= splitterX - KAILLERA_SPLITTER_GRAB_WIDTH &&
+		mouseX <= splitterX + KAILLERA_SPLITTER_GRAB_WIDTH &&
+		mouseY >= hotTop &&
+		mouseY <= hotBottom;
+}
+
+static void ApplyTopSectionSplitterLayout(HWND hDlg, int clientWidth) {
+	KailleraResizeItem* rePartItem = FindKailleraResizeItem(RE_PART);
+	KailleraResizeItem* usersListItem = FindKailleraResizeItem(LV_ULIST);
+	KailleraResizeItem* txtChatItem = FindKailleraResizeItem(TXT_CHAT);
+	KailleraResizeItem* chatBtnItem = FindKailleraResizeItem(IDC_CHAT);
+	KailleraResizeItem* createBtnItem = FindKailleraResizeItem(IDC_CREATE);
+	if (rePartItem == NULL || usersListItem == NULL || txtChatItem == NULL || chatBtnItem == NULL || createBtnItem == NULL)
+		return;
+
+	const int rightPanelWidth = GetTopRightPanelWidthForClient(clientWidth);
+	g_kaillera_top_right_width = rightPanelWidth;
+
+	const int usersListLeft = clientWidth - g_kaillera_top_right_margin - rightPanelWidth;
+	const int usersListTop = usersListItem->baseRect.top;
+	const int usersListHeight = usersListItem->baseRect.bottom - usersListItem->baseRect.top;
+	SetWindowPos(GetDlgItem(hDlg, LV_ULIST), NULL, usersListLeft, usersListTop, rightPanelWidth, usersListHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+
+	const int rePartLeft = rePartItem->baseRect.left;
+	const int rePartTop = rePartItem->baseRect.top;
+	int rePartRight = usersListLeft - g_kaillera_top_gap_repart_to_list;
+	if (rePartRight < rePartLeft + 80)
+		rePartRight = rePartLeft + 80;
+	SetWindowPos(GetDlgItem(hDlg, RE_PART), NULL, rePartLeft, rePartTop,
+		rePartRight - rePartLeft, rePartItem->baseRect.bottom - rePartTop,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+
+	const int createWidth = createBtnItem->baseRect.right - createBtnItem->baseRect.left;
+	const int chatWidth = chatBtnItem->baseRect.right - chatBtnItem->baseRect.left;
+	const int createLeft = usersListLeft - g_kaillera_top_gap_create_to_list - createWidth;
+	const int chatLeft = createLeft - g_kaillera_top_gap_chat_to_create - chatWidth;
+	int txtChatRight = chatLeft - g_kaillera_top_gap_txtchat_to_chat;
+	if (txtChatRight < txtChatItem->baseRect.left + 80)
+		txtChatRight = txtChatItem->baseRect.left + 80;
+
+	SetWindowPos(GetDlgItem(hDlg, IDC_CREATE), NULL, createLeft, createBtnItem->baseRect.top,
+		createWidth, createBtnItem->baseRect.bottom - createBtnItem->baseRect.top,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+	SetWindowPos(GetDlgItem(hDlg, IDC_CHAT), NULL, chatLeft, chatBtnItem->baseRect.top,
+		chatWidth, chatBtnItem->baseRect.bottom - chatBtnItem->baseRect.top,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+	SetWindowPos(GetDlgItem(hDlg, TXT_CHAT), NULL, txtChatItem->baseRect.left, txtChatItem->baseRect.top,
+		txtChatRight - txtChatItem->baseRect.left, txtChatItem->baseRect.bottom - txtChatItem->baseRect.top,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+}
+
+static void ApplyBottomSectionSplitterLayout(HWND hDlg, int clientWidth, int deltaY) {
+	KailleraResizeItem* gameChatItem = FindKailleraResizeItem(RE_GCHAT);
+	KailleraResizeItem* gameUsersItem = FindKailleraResizeItem(LV_GULIST);
+	KailleraResizeItem* gameInputItem = FindKailleraResizeItem(TXT_GINP);
+	KailleraResizeItem* gameChatBtnItem = FindKailleraResizeItem(BTN_GCHAT);
+	if (gameChatItem == NULL || gameUsersItem == NULL || gameInputItem == NULL || gameChatBtnItem == NULL)
+		return;
+
+	const int rightPanelWidth = GetBottomRightPanelWidthForClient(clientWidth);
+	g_kaillera_bottom_right_width = rightPanelWidth;
+
+	const int usersLeft = clientWidth - g_kaillera_bottom_right_margin - rightPanelWidth;
+	const int usersTop = gameUsersItem->baseRect.top;
+	const int usersHeight = (gameUsersItem->baseRect.bottom - gameUsersItem->baseRect.top) + deltaY;
+	SetWindowPos(GetDlgItem(hDlg, LV_GULIST), NULL, usersLeft, usersTop, rightPanelWidth, usersHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+
+	const int gameChatLeft = gameChatItem->baseRect.left;
+	const int gameChatTop = gameChatItem->baseRect.top;
+	int gameChatRight = usersLeft - g_kaillera_bottom_gap_regchat_to_list;
+	if (gameChatRight < gameChatLeft + 80)
+		gameChatRight = gameChatLeft + 80;
+	const int gameChatHeight = (gameChatItem->baseRect.bottom - gameChatItem->baseRect.top) + deltaY;
+	SetWindowPos(GetDlgItem(hDlg, RE_GCHAT), NULL, gameChatLeft, gameChatTop,
+		gameChatRight - gameChatLeft, gameChatHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+
+	const int chatBtnWidth = gameChatBtnItem->baseRect.right - gameChatBtnItem->baseRect.left;
+	const int chatBtnHeight = gameChatBtnItem->baseRect.bottom - gameChatBtnItem->baseRect.top;
+	const int chatBtnLeft = usersLeft - g_kaillera_bottom_gap_btn_to_list - chatBtnWidth;
+	const int chatBtnTop = gameChatBtnItem->baseRect.top + deltaY;
+	SetWindowPos(GetDlgItem(hDlg, BTN_GCHAT), NULL, chatBtnLeft, chatBtnTop, chatBtnWidth, chatBtnHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+
+	const int gameInputTop = gameInputItem->baseRect.top + deltaY;
+	int gameInputRight = chatBtnLeft - g_kaillera_bottom_gap_txtginp_to_btn;
+	if (gameInputRight < gameInputItem->baseRect.left + 80)
+		gameInputRight = gameInputItem->baseRect.left + 80;
+	SetWindowPos(GetDlgItem(hDlg, TXT_GINP), NULL, gameInputItem->baseRect.left, gameInputTop,
+		gameInputRight - gameInputItem->baseRect.left, gameInputItem->baseRect.bottom - gameInputItem->baseRect.top,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+}
+
+static void ApplyJoinMessageLayout(HWND hDlg, int deltaY) {
+	KailleraResizeItem* joinLabelItem = FindKailleraResizeItem(IDC_JOINMSG_LBL);
+	KailleraResizeItem* joinMsgItem = FindKailleraResizeItem(TXT_MSG);
+	if (joinLabelItem == NULL || joinMsgItem == NULL)
+		return;
+
+	RECT gameUsersRect;
+	HWND gameUsersList = GetDlgItem(hDlg, LV_GULIST);
+	if (gameUsersList == NULL || !GetWindowRect(gameUsersList, &gameUsersRect))
+		return;
+	MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)&gameUsersRect, 2);
+
+	const int joinOffset = joinMsgItem->baseRect.left - joinLabelItem->baseRect.left;
+	int joinMsgWidth = (gameUsersRect.right - gameUsersRect.left) - joinOffset;
+	if (joinMsgWidth < 40)
+		joinMsgWidth = 40;
+
+	const int joinLabelWidth = joinLabelItem->baseRect.right - joinLabelItem->baseRect.left;
+	const int joinLabelHeight = joinLabelItem->baseRect.bottom - joinLabelItem->baseRect.top;
+	const int joinMsgHeight = joinMsgItem->baseRect.bottom - joinMsgItem->baseRect.top;
+
+	SetWindowPos(GetDlgItem(hDlg, IDC_JOINMSG_LBL), NULL,
+		gameUsersRect.left, joinLabelItem->baseRect.top + deltaY,
+		joinLabelWidth, joinLabelHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+	SetWindowPos(GetDlgItem(hDlg, TXT_MSG), NULL,
+		gameUsersRect.left + joinOffset, joinMsgItem->baseRect.top + deltaY,
+		joinMsgWidth, joinMsgHeight,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+}
+
+static bool GetChildRectInClient(HWND hDlg, int controlId, RECT* outRect) {
+	HWND hCtrl = GetDlgItem(hDlg, controlId);
+	if (hCtrl == NULL || outRect == NULL)
+		return false;
+	if (!GetWindowRect(hCtrl, outRect))
+		return false;
+	MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)outRect, 2);
+	return true;
+}
+
+static void InitializeKailleraDialogResizeLayout(HWND hDlg) {
+	RECT clientRect;
+	RECT windowRect;
+	if (!GetClientRect(hDlg, &clientRect))
+		return;
+	if (!GetWindowRect(hDlg, &windowRect))
+		return;
+
+	g_kaillera_base_client_size.cx = clientRect.right - clientRect.left;
+	g_kaillera_base_client_size.cy = clientRect.bottom - clientRect.top;
+	g_kaillera_min_track_size.cx = windowRect.right - windowRect.left;
+	g_kaillera_min_track_size.cy = windowRect.bottom - windowRect.top;
+
+	const size_t itemCount = sizeof(g_kaillera_resize_items) / sizeof(g_kaillera_resize_items[0]);
+	for (size_t i = 0; i < itemCount; ++i) {
+		GetChildRectInClient(hDlg, g_kaillera_resize_items[i].id, &g_kaillera_resize_items[i].baseRect);
+	}
+
+	KailleraResizeItem* rePartItem = FindKailleraResizeItem(RE_PART);
+	KailleraResizeItem* usersListItem = FindKailleraResizeItem(LV_ULIST);
+	KailleraResizeItem* txtChatItem = FindKailleraResizeItem(TXT_CHAT);
+	KailleraResizeItem* chatBtnItem = FindKailleraResizeItem(IDC_CHAT);
+	KailleraResizeItem* createBtnItem = FindKailleraResizeItem(IDC_CREATE);
+	if (rePartItem != NULL && usersListItem != NULL && txtChatItem != NULL && chatBtnItem != NULL && createBtnItem != NULL) {
+		g_kaillera_top_right_width = usersListItem->baseRect.right - usersListItem->baseRect.left;
+		g_kaillera_top_right_margin = g_kaillera_base_client_size.cx - usersListItem->baseRect.right;
+		g_kaillera_top_gap_repart_to_list = usersListItem->baseRect.left - rePartItem->baseRect.right;
+		g_kaillera_top_gap_txtchat_to_chat = chatBtnItem->baseRect.left - txtChatItem->baseRect.right;
+		g_kaillera_top_gap_chat_to_create = createBtnItem->baseRect.left - chatBtnItem->baseRect.right;
+		g_kaillera_top_gap_create_to_list = usersListItem->baseRect.left - createBtnItem->baseRect.right;
+	}
+
+	KailleraResizeItem* gameChatItem = FindKailleraResizeItem(RE_GCHAT);
+	KailleraResizeItem* gameUsersItem = FindKailleraResizeItem(LV_GULIST);
+	KailleraResizeItem* gameInputItem = FindKailleraResizeItem(TXT_GINP);
+	KailleraResizeItem* gameChatBtnItem = FindKailleraResizeItem(BTN_GCHAT);
+	if (gameChatItem != NULL && gameUsersItem != NULL && gameInputItem != NULL && gameChatBtnItem != NULL) {
+		g_kaillera_bottom_right_width = gameUsersItem->baseRect.right - gameUsersItem->baseRect.left;
+		g_kaillera_bottom_right_margin = g_kaillera_base_client_size.cx - gameUsersItem->baseRect.right;
+		g_kaillera_bottom_gap_regchat_to_list = gameUsersItem->baseRect.left - gameChatItem->baseRect.right;
+		g_kaillera_bottom_gap_txtginp_to_btn = gameChatBtnItem->baseRect.left - gameInputItem->baseRect.right;
+		g_kaillera_bottom_gap_btn_to_list = gameUsersItem->baseRect.left - gameChatBtnItem->baseRect.right;
+	}
+
+	g_kaillera_active_splitter = KAILLERA_SPLITTER_NONE;
+	g_kaillera_resize_initialized = true;
+}
+
+static void ApplyKailleraDialogResizeLayout(HWND hDlg, int clientWidth, int clientHeight) {
+	if (!g_kaillera_resize_initialized)
+		return;
+
+	const int deltaX = clientWidth - g_kaillera_base_client_size.cx;
+	const int deltaY = clientHeight - g_kaillera_base_client_size.cy;
+	const size_t itemCount = sizeof(g_kaillera_resize_items) / sizeof(g_kaillera_resize_items[0]);
+
+	for (size_t i = 0; i < itemCount; ++i) {
+		const KailleraResizeItem& item = g_kaillera_resize_items[i];
+		HWND hCtrl = GetDlgItem(hDlg, item.id);
+		if (hCtrl == NULL)
+			continue;
+
+		RECT rect = item.baseRect;
+		const bool anchorLeft = (item.anchors & KAILLERA_ANCHOR_LEFT) != 0;
+		const bool anchorRight = (item.anchors & KAILLERA_ANCHOR_RIGHT) != 0;
+		const bool anchorTop = (item.anchors & KAILLERA_ANCHOR_TOP) != 0;
+		const bool anchorBottom = (item.anchors & KAILLERA_ANCHOR_BOTTOM) != 0;
+
+		if (anchorLeft && anchorRight) {
+			rect.right += deltaX;
+		} else if (!anchorLeft && anchorRight) {
+			rect.left += deltaX;
+			rect.right += deltaX;
+		}
+
+		if (anchorTop && anchorBottom) {
+			rect.bottom += deltaY;
+		} else if (!anchorTop && anchorBottom) {
+			rect.top += deltaY;
+			rect.bottom += deltaY;
+		}
+
+		const int width = rect.right - rect.left;
+		const int height = rect.bottom - rect.top;
+		if (width <= 0 || height <= 0)
+			continue;
+
+		SetWindowPos(hCtrl, NULL, rect.left, rect.top, width, height,
+			SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+	}
+
+	ApplyTopSectionSplitterLayout(hDlg, clientWidth);
+	ApplyBottomSectionSplitterLayout(hDlg, clientWidth, deltaY);
+	ApplyJoinMessageLayout(hDlg, deltaY);
+
+	// Redraw once after all children have moved to avoid flat-button paint artifacts while resizing.
+	RedrawWindow(hDlg, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
 static bool IsKailleraDialogFocused(){
 	HWND fg = GetForegroundWindow();
 	if (fg == NULL)
@@ -948,11 +1323,41 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 	switch (uMsg) {
 	case WM_INITDIALOG:
 		{
+			RECT originalClientRect = { 0, 0, 0, 0 };
+			GetClientRect(hDlg, &originalClientRect);
+
 			// Add WS_EX_APPWINDOW and remove WS_EX_TOOLWINDOW to show in Windows taskbar
 			LONG_PTR exStyle = GetWindowLongPtr(hDlg, GWL_EXSTYLE);
 			exStyle |= WS_EX_APPWINDOW;
 			exStyle &= ~WS_EX_TOOLWINDOW;
 			SetWindowLongPtr(hDlg, GWL_EXSTYLE, exStyle);
+
+			// Enable standard resize/maximize chrome for the Kaillera main window.
+			LONG_PTR style = GetWindowLongPtr(hDlg, GWL_STYLE);
+			style |= (WS_THICKFRAME | WS_MAXIMIZEBOX);
+			SetWindowLongPtr(hDlg, GWL_STYLE, style);
+			SetWindowPos(hDlg, NULL, 0, 0, 0, 0,
+				SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+			// Keep the original client area so bottom-row controls don't get clipped after enabling WS_THICKFRAME.
+			RECT resizedClientRect = { 0, 0, 0, 0 };
+			if (GetClientRect(hDlg, &resizedClientRect)) {
+				const int originalClientWidth = originalClientRect.right - originalClientRect.left;
+				const int originalClientHeight = originalClientRect.bottom - originalClientRect.top;
+				const int resizedClientWidth = resizedClientRect.right - resizedClientRect.left;
+				const int resizedClientHeight = resizedClientRect.bottom - resizedClientRect.top;
+				const int growWidth = originalClientWidth - resizedClientWidth;
+				const int growHeight = originalClientHeight - resizedClientHeight;
+				if (growWidth > 0 || growHeight > 0) {
+					RECT windowRect = { 0, 0, 0, 0 };
+					if (GetWindowRect(hDlg, &windowRect)) {
+						const int windowWidth = windowRect.right - windowRect.left;
+						const int windowHeight = windowRect.bottom - windowRect.top;
+						SetWindowPos(hDlg, NULL, 0, 0, windowWidth + growWidth, windowHeight + growHeight,
+							SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+					}
+				}
+			}
 
 			kaillera_sdlg = hDlg;
 			LoadJoinNotifySettings();
@@ -1022,10 +1427,100 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 			kaillera_sdlg_sipd_timer = SetTimer(hDlg, 0, 1000, 0);
 
 			MINGUIUPDATE = false;
+			InitializeKailleraDialogResizeLayout(hDlg);
 
 			return 0;
 			
 		}
+	case WM_GETMINMAXINFO:
+		if (g_kaillera_resize_initialized) {
+			MINMAXINFO* minMaxInfo = (MINMAXINFO*)lParam;
+			minMaxInfo->ptMinTrackSize.x = g_kaillera_min_track_size.cx;
+			minMaxInfo->ptMinTrackSize.y = g_kaillera_min_track_size.cy;
+			return 0;
+		}
+		break;
+	case WM_SIZE:
+		if (wParam != SIZE_MINIMIZED) {
+			RECT clientRect;
+			if (GetClientRect(hDlg, &clientRect)) {
+				ApplyKailleraDialogResizeLayout(hDlg,
+					clientRect.right - clientRect.left,
+					clientRect.bottom - clientRect.top);
+			}
+		}
+		break;
+	case WM_SETCURSOR:
+		if (LOWORD(lParam) == HTCLIENT && g_kaillera_resize_initialized) {
+			POINT cursorPos;
+			if (GetCursorPos(&cursorPos)) {
+				ScreenToClient(hDlg, &cursorPos);
+				if (IsTopSplitterHit(hDlg, cursorPos.x, cursorPos.y) || IsBottomSplitterHit(hDlg, cursorPos.x, cursorPos.y)) {
+					SetCursor(LoadCursor(NULL, IDC_SIZEWE));
+					return TRUE;
+				}
+			}
+		}
+		break;
+	case WM_LBUTTONDOWN:
+		if (g_kaillera_resize_initialized) {
+			const int mouseX = (int)(short)LOWORD(lParam);
+			const int mouseY = (int)(short)HIWORD(lParam);
+			if (IsTopSplitterHit(hDlg, mouseX, mouseY)) {
+				g_kaillera_active_splitter = KAILLERA_SPLITTER_TOP;
+				SetCapture(hDlg);
+				return 0;
+			}
+			if (IsBottomSplitterHit(hDlg, mouseX, mouseY)) {
+				g_kaillera_active_splitter = KAILLERA_SPLITTER_BOTTOM;
+				SetCapture(hDlg);
+				return 0;
+			}
+		}
+		break;
+	case WM_MOUSEMOVE:
+		if (g_kaillera_active_splitter != KAILLERA_SPLITTER_NONE && g_kaillera_resize_initialized) {
+			const int mouseX = (int)(short)LOWORD(lParam);
+			RECT clientRect;
+			if (GetClientRect(hDlg, &clientRect)) {
+				const int clientWidth = clientRect.right - clientRect.left;
+				int maxRightWidth;
+				int newRightWidth;
+				if (g_kaillera_active_splitter == KAILLERA_SPLITTER_TOP) {
+					newRightWidth = clientWidth - g_kaillera_top_right_margin - mouseX;
+					maxRightWidth = clientWidth - g_kaillera_top_right_margin - 140;
+					if (maxRightWidth < 120)
+						maxRightWidth = 120;
+					newRightWidth = ClampInt(newRightWidth, 120, maxRightWidth);
+					if (newRightWidth != g_kaillera_top_right_width) {
+						g_kaillera_top_right_width = newRightWidth;
+						ApplyKailleraDialogResizeLayout(hDlg, clientWidth, clientRect.bottom - clientRect.top);
+					}
+				} else if (g_kaillera_active_splitter == KAILLERA_SPLITTER_BOTTOM) {
+					newRightWidth = clientWidth - g_kaillera_bottom_right_margin - mouseX;
+					maxRightWidth = clientWidth - g_kaillera_bottom_right_margin - 140;
+					if (maxRightWidth < 120)
+						maxRightWidth = 120;
+					newRightWidth = ClampInt(newRightWidth, 120, maxRightWidth);
+					if (newRightWidth != g_kaillera_bottom_right_width) {
+						g_kaillera_bottom_right_width = newRightWidth;
+						ApplyKailleraDialogResizeLayout(hDlg, clientWidth, clientRect.bottom - clientRect.top);
+					}
+				}
+			}
+			return 0;
+		}
+		break;
+	case WM_LBUTTONUP:
+		if (g_kaillera_active_splitter != KAILLERA_SPLITTER_NONE) {
+			g_kaillera_active_splitter = KAILLERA_SPLITTER_NONE;
+			ReleaseCapture();
+			return 0;
+		}
+		break;
+	case WM_CAPTURECHANGED:
+		g_kaillera_active_splitter = KAILLERA_SPLITTER_NONE;
+		break;
 	case WM_TIMER:
 		{
 			if (kaillera_sdlg_MODE==1) {
