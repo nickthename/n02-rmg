@@ -140,10 +140,17 @@ static int g_lobby_column_restore_widths[4] = { 100, 60, 60, 120 };
 static int g_games_column_restore_widths[6] = { 285, 60, 130, 150, 50, 45 };
 static const int KAILLERA_MIN_COLUMN_WIDTH = 16;
 static bool g_kaillera_allow_zero_width_columns = false;
+static bool g_hidden_column_track_active = false;
+static HWND g_hidden_column_track_list = NULL;
+static int g_hidden_column_track_item = -1;
+static int g_hidden_column_track_prev_item = -1;
+static int g_hidden_column_track_start_prev_width = 0;
+static int g_hidden_column_track_start_cursor_x = 0;
 
 static void ExecuteOptions();
 static void ApplyKailleraDialogResizeLayout(HWND hDlg, int clientWidth, int clientHeight);
 static void SyncColumnRestoreWidths(HWND listHandle, int* restoreWidths, KailleraColumnMenuItem* columns, int count);
+static int FindPreviousVisibleColumn(HWND listHandle, int fromColumn);
 
 enum {
 	KAILLERA_ANCHOR_LEFT = 1 << 0,
@@ -1309,6 +1316,16 @@ static void SyncColumnRestoreWidths(HWND listHandle, int* restoreWidths, Kailler
 	}
 }
 
+static int FindPreviousVisibleColumn(HWND listHandle, int fromColumn) {
+	if (listHandle == NULL || fromColumn <= 0)
+		return -1;
+	for (int i = fromColumn - 1; i >= 0; --i) {
+		if (ListView_GetColumnWidth(listHandle, i) > 0)
+			return i;
+	}
+	return -1;
+}
+
 static void ShowColumnVisibilityMenu(
 	HWND hDlg,
 	HWND listHandle,
@@ -1357,7 +1374,9 @@ static void ShowColumnVisibilityMenu(
 					restoreWidth = columns[i].defaultWidth;
 				if (restoreWidth > 0 && restoreWidth < KAILLERA_MIN_COLUMN_WIDTH)
 					restoreWidth = KAILLERA_MIN_COLUMN_WIDTH;
+				g_kaillera_allow_zero_width_columns = true;
 				ListView_SetColumnWidth(listHandle, i, restoreWidth);
+				g_kaillera_allow_zero_width_columns = false;
 			}
 			break;
 		}
@@ -1649,6 +1668,13 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 
 			kaillera_sdlg_sipd_timer = SetTimer(hDlg, 0, 1000, 0);
 
+			g_hidden_column_track_active = false;
+			g_hidden_column_track_list = NULL;
+			g_hidden_column_track_item = -1;
+			g_hidden_column_track_prev_item = -1;
+			g_hidden_column_track_start_prev_width = 0;
+			g_hidden_column_track_start_cursor_x = 0;
+
 			MINGUIUPDATE = false;
 			InitializeKailleraDialogResizeLayout(hDlg);
 			LoadKailleraDialogLayout(hDlg);
@@ -1926,14 +1952,113 @@ LRESULT CALLBACK KailleraServerDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 				HWND gamesHeader = (kaillera_sdlg_gameslv.handle != NULL) ? ListView_GetHeader(kaillera_sdlg_gameslv.handle) : NULL;
 				HWND usersHeader = (kaillera_sdlg_userslv.handle != NULL) ? ListView_GetHeader(kaillera_sdlg_userslv.handle) : NULL;
 				HWND lobbyHeader = (kaillera_sdlg_LV_GULIST.handle != NULL) ? ListView_GetHeader(kaillera_sdlg_LV_GULIST.handle) : NULL;
+				HWND headerOwnerList = NULL;
+				if (hdr->hwndFrom == gamesHeader)
+					headerOwnerList = kaillera_sdlg_gameslv.handle;
+				else if (hdr->hwndFrom == usersHeader)
+					headerOwnerList = kaillera_sdlg_userslv.handle;
+				else if (hdr->hwndFrom == lobbyHeader)
+					headerOwnerList = kaillera_sdlg_LV_GULIST.handle;
+
+				if ((hdr->code == HDN_BEGINTRACKA || hdr->code == HDN_BEGINTRACKW) && headerOwnerList != NULL) {
+					NMHEADERA* nmh = (NMHEADERA*)lParam;
+					g_hidden_column_track_active = false;
+					if (!g_kaillera_allow_zero_width_columns && nmh->iItem >= 0 &&
+						ListView_GetColumnWidth(headerOwnerList, nmh->iItem) == 0) {
+						const int prevVisible = FindPreviousVisibleColumn(headerOwnerList, nmh->iItem);
+						if (prevVisible >= 0) {
+							POINT cursorPos;
+							if (GetCursorPos(&cursorPos)) {
+								g_hidden_column_track_active = true;
+								g_hidden_column_track_list = headerOwnerList;
+								g_hidden_column_track_item = nmh->iItem;
+								g_hidden_column_track_prev_item = prevVisible;
+								g_hidden_column_track_start_prev_width = ListView_GetColumnWidth(headerOwnerList, prevVisible);
+								g_hidden_column_track_start_cursor_x = cursorPos.x;
+							}
+						}
+					}
+				}
+
+				if ((hdr->code == HDN_ENDTRACKA || hdr->code == HDN_ENDTRACKW || hdr->code == HDN_ENDDRAG) &&
+					headerOwnerList != NULL) {
+					g_hidden_column_track_active = false;
+					g_hidden_column_track_list = NULL;
+					g_hidden_column_track_item = -1;
+					g_hidden_column_track_prev_item = -1;
+				}
+
+				if ((hdr->code == HDN_TRACKA || hdr->code == HDN_TRACKW) &&
+					headerOwnerList != NULL) {
+					NMHEADERA* nmh = (NMHEADERA*)lParam;
+					if (!g_kaillera_allow_zero_width_columns && g_hidden_column_track_active &&
+						headerOwnerList == g_hidden_column_track_list &&
+						nmh->iItem == g_hidden_column_track_item &&
+						g_hidden_column_track_prev_item >= 0) {
+						POINT cursorPos;
+						if (GetCursorPos(&cursorPos)) {
+							int nextWidth = g_hidden_column_track_start_prev_width + (cursorPos.x - g_hidden_column_track_start_cursor_x);
+							if (nextWidth < KAILLERA_MIN_COLUMN_WIDTH)
+								nextWidth = KAILLERA_MIN_COLUMN_WIDTH;
+							ListView_SetColumnWidth(headerOwnerList, g_hidden_column_track_prev_item, nextWidth);
+						}
+						if (nmh->pitem != NULL && (nmh->pitem->mask & HDI_WIDTH) != 0)
+							nmh->pitem->cxy = 0;
+					}
+				}
+
 				if ((hdr->code == HDN_ITEMCHANGINGA || hdr->code == HDN_ITEMCHANGINGW) &&
-					(hdr->hwndFrom == gamesHeader || hdr->hwndFrom == usersHeader || hdr->hwndFrom == lobbyHeader)) {
+					headerOwnerList != NULL) {
 					NMHEADERA* nmh = (NMHEADERA*)lParam;
 					if (nmh->pitem != NULL && (nmh->pitem->mask & HDI_WIDTH) != 0) {
-						if (nmh->pitem->cxy == 0 && !g_kaillera_allow_zero_width_columns)
+						int currentWidth = -1;
+						if (nmh->iItem >= 0)
+							currentWidth = ListView_GetColumnWidth(headerOwnerList, nmh->iItem);
+
+						// Hidden columns can only be changed by explicit menu/load paths.
+						if (!g_kaillera_allow_zero_width_columns && currentWidth == 0) {
+							// If user drags a border for a hidden column, resize the previous visible column instead.
+							const bool trackingThisHiddenColumn =
+								g_hidden_column_track_active &&
+								headerOwnerList == g_hidden_column_track_list &&
+								nmh->iItem == g_hidden_column_track_item &&
+								g_hidden_column_track_prev_item >= 0;
+
+							if (!trackingThisHiddenColumn) {
+								const int prevVisible = FindPreviousVisibleColumn(headerOwnerList, nmh->iItem);
+								if (prevVisible >= 0) {
+									POINT cursorPos;
+									if (GetCursorPos(&cursorPos)) {
+										g_hidden_column_track_active = true;
+										g_hidden_column_track_list = headerOwnerList;
+										g_hidden_column_track_item = nmh->iItem;
+										g_hidden_column_track_prev_item = prevVisible;
+										g_hidden_column_track_start_prev_width = ListView_GetColumnWidth(headerOwnerList, prevVisible);
+										// If the notification already has a positive width delta, account for it so the first drag event takes effect.
+										const int initialDelta = (nmh->pitem->cxy > 0) ? nmh->pitem->cxy : 0;
+										g_hidden_column_track_start_cursor_x = cursorPos.x - initialDelta;
+									}
+								}
+							}
+
+							if (g_hidden_column_track_active &&
+								headerOwnerList == g_hidden_column_track_list &&
+								nmh->iItem == g_hidden_column_track_item &&
+								g_hidden_column_track_prev_item >= 0) {
+								POINT cursorPos;
+								if (GetCursorPos(&cursorPos)) {
+									int nextWidth = g_hidden_column_track_start_prev_width + (cursorPos.x - g_hidden_column_track_start_cursor_x);
+									if (nextWidth < KAILLERA_MIN_COLUMN_WIDTH)
+										nextWidth = KAILLERA_MIN_COLUMN_WIDTH;
+									ListView_SetColumnWidth(headerOwnerList, g_hidden_column_track_prev_item, nextWidth);
+								}
+							}
+							nmh->pitem->cxy = 0;
+						} else if (nmh->pitem->cxy == 0 && !g_kaillera_allow_zero_width_columns) {
+							nmh->pitem->cxy = (currentWidth == 0) ? 0 : KAILLERA_MIN_COLUMN_WIDTH;
+						} else if (nmh->pitem->cxy > 0 && nmh->pitem->cxy < KAILLERA_MIN_COLUMN_WIDTH) {
 							nmh->pitem->cxy = KAILLERA_MIN_COLUMN_WIDTH;
-						else if (nmh->pitem->cxy > 0 && nmh->pitem->cxy < KAILLERA_MIN_COLUMN_WIDTH)
-							nmh->pitem->cxy = KAILLERA_MIN_COLUMN_WIDTH;
+						}
 					}
 				}
 				if (hdr->code == NM_RCLICK && hdr->hwndFrom == gamesHeader) {
